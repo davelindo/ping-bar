@@ -1,6 +1,6 @@
 import Foundation
 
-class DNSService {
+final class DNSService {
     private let hostname: String
 
     init(hostname: String = "cloudflare.com") {
@@ -23,5 +23,20 @@ class DNSService {
         }
 
         return status == 0 ? elapsed : nil
+    }
+
+    func currentServers() -> [String] {
+        guard let contents = try? String(contentsOfFile: "/etc/resolv.conf", encoding: .utf8) else {
+            return []
+        }
+        return contents
+            .split(separator: "\n")
+            .compactMap { line -> String? in
+                let trimmed = line.trimmingCharacters(in: .whitespaces)
+                guard trimmed.hasPrefix("nameserver") else { return nil }
+                let parts = trimmed.split(separator: " ")
+                guard parts.count >= 2 else { return nil }
+                return String(parts[1])
+            }
     }
 }

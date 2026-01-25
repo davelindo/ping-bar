@@ -1,7 +1,8 @@
 import Foundation
 
-class PingService {
+final class PingService {
     private let target: String
+    private static let timeRegex = try? NSRegularExpression(pattern: "time=(\\d+\\.?\\d*)")
 
     init(target: String = "google.com") {
         self.target = target
@@ -26,8 +27,7 @@ class PingService {
         let data = pipe.fileHandleForReading.readDataToEndOfFile()
         guard let output = String(data: data, encoding: .utf8) else { return nil }
 
-        let pattern = "time=(\\d+\\.?\\d*)"
-        guard let regex = try? NSRegularExpression(pattern: pattern),
+        guard let regex = Self.timeRegex,
               let match = regex.firstMatch(in: output, range: NSRange(output.startIndex..., in: output)),
               let range = Range(match.range(at: 1), in: output) else {
             return nil

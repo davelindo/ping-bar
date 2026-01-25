@@ -1,7 +1,7 @@
 import Foundation
 import CoreLocation
 
-class LocationManager: NSObject, CLLocationManagerDelegate {
+final class LocationManager: NSObject, CLLocationManagerDelegate {
     private let manager = CLLocationManager()
     var onAuthorizationChanged: ((CLAuthorizationStatus) -> Void)?
 

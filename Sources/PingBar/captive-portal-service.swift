@@ -1,7 +1,7 @@
 import Foundation
 import AppKit
 
-class CaptivePortalService {
+final class CaptivePortalService {
     private let testURL = URL(string: "http://captive.apple.com/hotspot-detect.html")!
 
     func check(completion: @escaping (CaptivePortalStatus) -> Void) {

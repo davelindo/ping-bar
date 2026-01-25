@@ -2,7 +2,7 @@
 
 Network diagnostics in your menu bar. Monitor latency, WiFi signal, and connection quality at a glance.
 
-**[Download Latest Release](https://github.com/elitan/ping-bar/releases/latest/download/PingBar.zip)**
+**[Download Latest Release](https://github.com/davelindo/ping-bar/releases/latest/download/PingBar.zip)**
 
 <p align="center">
   <img src="assets/pingbar.png" alt="PingBar Screenshot" width="400">
@@ -10,24 +10,25 @@ Network diagnostics in your menu bar. Monitor latency, WiFi signal, and connecti
 
 ## Features
 
-- **Menu bar latency** - Live ping displayed in menu bar with color coding
-- **WiFi details** - Network name, signal strength, noise floor, link rate, frequency band
+- **Menu bar latency or throughput** - Live ping or up/down rates in the menu bar
+- **Wi‑Fi details** - Network name, signal strength, noise floor, link rate, band, and Wi‑Fi standard
 - **Router ping** - Latency to gateway with jitter, packet loss, and sparkline history
 - **Internet ping** - Latency to 1.1.1.1 with jitter, packet loss, and sparkline history
+- **Throughput graph** - Live up/down history and total transfer counters
 - **DNS lookup** - Resolution time for cloudflare.com with sparkline history
+- **Speed test** - Cloudflare-based download/upload with lag-under-load rating
 - **Captive portal detection** - Alerts when network login is required
-- **Signed & notarized** - No Gatekeeper warnings
 
 ## Install
 
-1. Download [PingBar.zip](https://github.com/elitan/ping-bar/releases/latest/download/PingBar.zip)
+1. Download [PingBar.zip](https://github.com/davelindo/ping-bar/releases/latest/download/PingBar.zip)
 2. Unzip and move `PingBar.app` to Applications
 3. Open PingBar
 
 ### Build from source
 
 ```bash
-git clone https://github.com/elitan/ping-bar.git
+git clone https://github.com/davelindo/ping-bar.git
 cd ping-bar
 ./scripts/build-app.sh
 ```

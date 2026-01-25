@@ -1,63 +1,123 @@
 import Foundation
 
-class MetricHistory {
+final class MetricHistory {
     private var buffer: [Double?]
     private var index = 0
     private var isFull = false
     let capacity: Int
+    private var cachedValues: [Double?] = []
+    private var cachedNonNilValues: [Double] = []
+    private var cachedLatest: Double?
+    private var cachedAverage: Double?
+    private var cachedJitter: Double?
+    private var cachedLossPercentage: Double = 0
+    private var cachedMin: Double?
+    private var cachedMax: Double?
 
     init(capacity: Int = 60) {
         self.capacity = capacity
         self.buffer = Array(repeating: nil, count: capacity)
+        recalculate()
     }
 
     func add(_ value: Double?) {
         buffer[index] = value
         index = (index + 1) % capacity
         if index == 0 { isFull = true }
+        recalculate()
     }
 
     var values: [Double?] {
-        if isFull {
-            return Array(buffer[index...]) + Array(buffer[..<index])
-        } else {
-            return Array(buffer[..<index])
-        }
+        cachedValues
     }
 
     var nonNilValues: [Double] {
-        values.compactMap { $0 }
+        cachedNonNilValues
     }
 
     var latest: Double? {
-        if index == 0 && !isFull { return nil }
-        let lastIndex = index == 0 ? capacity - 1 : index - 1
-        return buffer[lastIndex]
+        cachedLatest
     }
 
     var average: Double? {
-        let vals = nonNilValues
-        guard !vals.isEmpty else { return nil }
-        return vals.reduce(0, +) / Double(vals.count)
+        cachedAverage
     }
 
     var jitter: Double? {
-        let vals = nonNilValues
-        guard vals.count > 1, let avg = average else { return nil }
-        let deviations = vals.map { abs($0 - avg) }
-        return deviations.reduce(0, +) / Double(deviations.count)
+        cachedJitter
     }
 
     var lossPercentage: Double {
-        let total = isFull ? capacity : index
-        guard total > 0 else { return 0 }
-        let nilCount = values.filter { $0 == nil }.count
-        return Double(nilCount) / Double(total) * 100
+        cachedLossPercentage
+    }
+
+    var minValue: Double? {
+        cachedMin
+    }
+
+    var maxValue: Double? {
+        cachedMax
     }
 
     func clear() {
         buffer = Array(repeating: nil, count: capacity)
         index = 0
         isFull = false
+        recalculate()
+    }
+
+    private func recalculate() {
+        if isFull {
+            cachedValues = Array(buffer[index...]) + Array(buffer[..<index])
+        } else {
+            cachedValues = Array(buffer[..<index])
+        }
+
+        cachedLatest = cachedValues.last.flatMap { $0 }
+        cachedNonNilValues.removeAll(keepingCapacity: true)
+        cachedNonNilValues.reserveCapacity(cachedValues.count)
+
+        var nilCount = 0
+        var minVal = Double.greatestFiniteMagnitude
+        var maxVal = -Double.greatestFiniteMagnitude
+
+        for value in cachedValues {
+            guard let value else {
+                nilCount += 1
+                continue
+            }
+            cachedNonNilValues.append(value)
+            minVal = min(minVal, value)
+            maxVal = max(maxVal, value)
+        }
+
+        let total = cachedValues.count
+        cachedLossPercentage = total > 0 ? Double(nilCount) / Double(total) * 100 : 0
+
+        guard !cachedNonNilValues.isEmpty else {
+            cachedAverage = nil
+            cachedJitter = nil
+            cachedMin = nil
+            cachedMax = nil
+            return
+        }
+
+        cachedMin = minVal
+        cachedMax = maxVal
+
+        let sum = cachedNonNilValues.reduce(0, +)
+        let avg = sum / Double(cachedNonNilValues.count)
+        cachedAverage = avg
+
+        guard cachedNonNilValues.count > 1 else {
+            cachedJitter = nil
+            return
+        }
+
+        var deviationSum = 0.0
+        for value in cachedNonNilValues {
+            deviationSum += abs(value - avg)
+        }
+        cachedJitter = deviationSum / Double(cachedNonNilValues.count)
     }
 }
