@@ -1,51 +1,72 @@
 import SwiftUI
 
+private enum HistoryScope: String, CaseIterable, Identifiable {
+    case all = "All"
+    case ssid = "SSID"
+
+    var id: String { rawValue }
+}
+
+private enum DiagnosticsFace: Hashable {
+    case overview
+    case settings
+    case history
+}
+
 struct DiagnosticsView: View {
     @ObservedObject var viewModel: DiagnosticsViewModel
     @ObservedObject var settings: SettingsStore
     var onQuit: () -> Void
-    @State private var showingSettings = false
+    @State private var face: DiagnosticsFace = .overview
+    @State private var historyScope: HistoryScope = .all
 
     var body: some View {
         Group {
             if viewModel.isPopoverVisible {
                 VStack(spacing: 0) {
-                    ZStack {
-                        mainContent
-                            .rotation3DEffect(
-                                .degrees(showingSettings ? 180 : 0),
-                                axis: (x: 0, y: 1, z: 0),
-                                perspective: 0.6
-                            )
-                            .opacity(showingSettings ? 0 : 1)
-                            .frame(maxWidth: .infinity, maxHeight: .infinity)
-
-                        settingsContent
-                            .rotation3DEffect(
-                                .degrees(showingSettings ? 0 : -180),
-                                axis: (x: 0, y: 1, z: 0),
-                                perspective: 0.6
-                            )
-                            .opacity(showingSettings ? 1 : 0)
-                            .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    }
-                    .animation(.easeInOut(duration: 0.35), value: showingSettings)
+                    activeContent
+                        .id(face)
+                        .transition(.asymmetric(
+                            insertion: .opacity.combined(with: .scale(scale: 0.98)),
+                            removal: .opacity
+                        ))
+                        .animation(.easeInOut(duration: 0.25), value: face)
 
                     footerBar
                 }
-                .frame(width: 360, height: 520)
+                .frame(width: 390, height: 560)
                 .background(popoverBackground)
             } else {
                 Color.clear
-                    .frame(width: 360, height: 520)
+                    .frame(width: 390, height: 560)
             }
+        }
+        .onChange(of: viewModel.isPopoverVisible) { visible in
+            if !visible {
+                face = .overview
+                historyScope = .all
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var activeContent: some View {
+        switch face {
+        case .overview:
+            mainContent
+        case .settings:
+            settingsContent
+        case .history:
+            historyContent
         }
     }
 
     private var mainContent: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 12) {
+            VStack(alignment: .leading, spacing: 14) {
                 networkSummary
+                healthOverview
+                dataUsageSection
 
                 if viewModel.connectionStatus == .offline {
                     offlineBanner
@@ -63,26 +84,13 @@ struct DiagnosticsView: View {
                     legacyWifiBanner
                 }
 
-                if isWiredConnection {
-                    routerSection
-                    sectionDivider
-                    internetSection
-                    sectionDivider
-                    dnsSection
-                    sectionDivider
-                    wifiSection
-                } else {
-                    wifiSection
-                    sectionDivider
-                    routerSection
-                    sectionDivider
-                    internetSection
-                    sectionDivider
-                    dnsSection
-                }
-
+                internetSection
+                wifiSection
+                dnsSection
             }
-            .padding(12)
+            .padding(.horizontal, 16)
+            .padding(.top, 22)
+            .padding(.bottom, 18)
         }
     }
 
@@ -92,31 +100,51 @@ struct DiagnosticsView: View {
                 settingsHeader
                 SettingsView(diagnosticsViewModel: viewModel, settings: settings)
             }
-            .padding(12)
+            .padding(.horizontal, 24)
+            .padding(.top, 22)
+            .padding(.bottom, 18)
+        }
+    }
+
+    private var historyContent: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 12) {
+                historyHeader
+                historySummary
+                historyRecords
+                topNetworksSection
+            }
+            .padding(.horizontal, 18)
+            .padding(.top, 22)
+            .padding(.bottom, 18)
         }
     }
 
     private var networkSummary: some View {
-        HStack(spacing: 8) {
+        HStack(spacing: 14) {
             Circle()
                 .fill(viewModel.connectionStatus.color)
-                .frame(width: 8, height: 8)
+                .frame(width: 20, height: 20)
 
             if viewModel.connectionStatus == .offline,
                viewModel.wifiInfo == nil,
                viewModel.defaultRouteInterface == nil {
                 Text("Not connected")
-                    .font(.system(size: 13, weight: .medium))
+                    .font(.system(size: 22, weight: .semibold))
                     .foregroundColor(.secondary)
             } else {
                 Text(viewModel.primaryConnectionName)
-                    .font(.system(size: 13, weight: .medium))
+                    .font(.system(size: 22, weight: .semibold))
+                    .lineLimit(1)
                 if let wifi = viewModel.wifiInfo, wifi.ssid == nil && !viewModel.hasLocationPermission {
                     Button(action: { viewModel.requestLocationPermission() }) {
-                        Image(systemName: "location.circle.fill")
+                        Image(systemName: "location.north.fill")
+                            .font(.system(size: 10, weight: .semibold))
+                            .foregroundColor(.secondary)
                     }
-                    .buttonStyle(.bordered)
-                    .controlSize(.mini)
+                    .buttonStyle(.plain)
+                    .frame(width: 28, height: 14)
+                    .background(Color.secondary.opacity(0.24), in: Capsule())
                     .help("Grant Location Permission")
                 }
             }
@@ -124,14 +152,15 @@ struct DiagnosticsView: View {
             Spacer()
 
             if let wifi = viewModel.wifiInfo {
-                let standardLabel = wifi.standard.rawValue.replacingOccurrences(of: "Wi-Fi ", with: "")
-                let detailLabel = wifi.standard == .unknown ? wifi.band.rawValue : "\(standardLabel) · \(wifi.band.rawValue)"
+                let detailLabel = wifiDetailLabel(wifi)
                 Text(detailLabel)
-                    .font(.system(size: 10, weight: .semibold))
-                    .padding(.horizontal, 6)
-                    .padding(.vertical, 2)
-                    .background(Color.secondary.opacity(0.15))
-                    .cornerRadius(4)
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundColor(.secondary)
+                    .lineLimit(1)
+                    .fixedSize(horizontal: true, vertical: false)
+                    .padding(.horizontal, 13)
+                    .padding(.vertical, 8)
+                    .background(panelFill, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
             }
 
             if let wiredIcon = wiredIndicatorIcon(type: viewModel.activeConnectionType) {
@@ -139,36 +168,153 @@ struct DiagnosticsView: View {
                     .foregroundColor(.green)
                     .help(wiredIndicatorHelp(type: viewModel.activeConnectionType))
             }
+
+            Button(action: showSettings) {
+                Image(systemName: "gearshape")
+                    .font(.system(size: 20, weight: .medium))
+                    .foregroundColor(face == .settings ? .primary : .secondary)
+            }
+            .buttonStyle(.plain)
+            .help(face == .settings ? "Back to Overview" : "Settings")
+            .accessibilityLabel(face == .settings ? "Back to overview" : "Settings")
+        }
+        .frame(height: 46)
+    }
+
+    private var dataUsageSection: some View {
+        sectionPanel("Data Usage") {
+            VStack(alignment: .leading, spacing: 10) {
+                HStack(alignment: .firstTextBaseline) {
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text("Overall")
+                            .font(.system(size: 11, weight: .semibold))
+                            .foregroundColor(.secondary)
+                        Text(formatBytes(viewModel.dataUsage.overall.total))
+                            .font(.system(size: 24, weight: .semibold, design: .monospaced))
+                    }
+
+                    Spacer()
+
+                    VStack(alignment: .trailing, spacing: 4) {
+                        transferSplit(viewModel.dataUsage.overall)
+                        Text("Today \(formatBytes(viewModel.dataUsage.today.total))")
+                            .font(.system(size: 11, weight: .medium))
+                            .foregroundColor(.secondary)
+                    }
+                }
+
+                Divider().opacity(0.45)
+
+                if settings.isDataUsageHistoryEnabled {
+                    HStack(spacing: 10) {
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text(settings.isPerNetworkUsageEnabled ? (viewModel.dataUsage.currentNetworkName ?? "Current Network") : "Per-SSID totals off")
+                                .font(.system(size: 12, weight: .semibold))
+                                .lineLimit(1)
+                            Text(settings.isPerNetworkUsageEnabled ? "\(formatBytes(viewModel.dataUsage.currentNetworkTotals?.total ?? 0)) on this network" : "Overall usage is still recorded")
+                                .font(.system(size: 11, weight: .medium))
+                                .foregroundColor(.secondary)
+                                .lineLimit(1)
+                        }
+
+                        Spacer()
+
+                        Button(action: showHistory) {
+                            Image(systemName: "clock.arrow.circlepath")
+                                .font(.system(size: 15, weight: .semibold))
+                        }
+                        .buttonStyle(.plain)
+                        .help("Data History")
+                        .accessibilityLabel("Data history")
+                    }
+                } else {
+                    Text("Usage history is off")
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundColor(.secondary)
+                }
+
+                if settings.isPerNetworkUsageEnabled {
+                    ForEach(Array(viewModel.dataUsage.networks.prefix(2))) { network in
+                        usageListRow(title: network.name, totals: network.totals)
+                    }
+                }
+            }
+            .padding(.vertical, 10)
         }
     }
 
+    private var healthOverview: some View {
+        HStack(spacing: 8) {
+            healthTile(
+                title: "Internet",
+                value: formatLatency(viewModel.internetLatency),
+                icon: "globe",
+                color: viewModel.colorForInternetProbe(viewModel.internetLatency)
+            )
+            healthTile(
+                title: "Router",
+                value: formatLatency(viewModel.routerLatency),
+                icon: "wifi.router",
+                color: viewModel.colorForPing(viewModel.routerLatency)
+            )
+            healthTile(
+                title: "Loss",
+                value: formatLoss(viewModel.internetLoss),
+                icon: "waveform.path.ecg",
+                color: viewModel.colorForLoss(viewModel.internetLoss)
+            )
+        }
+    }
+
+    private func healthTile(title: String, value: String, icon: String, color: Color) -> some View {
+        HStack(alignment: .top, spacing: 8) {
+            Image(systemName: icon)
+                .font(.system(size: 16, weight: .medium))
+                .foregroundColor(color)
+                .frame(width: 18)
+
+            VStack(alignment: .leading, spacing: 12) {
+                Text(title)
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundColor(.secondary)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.8)
+                Text(value)
+                    .font(.system(size: 24, weight: .semibold, design: .monospaced))
+                    .foregroundColor(color)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.72)
+            }
+        }
+        .padding(.horizontal, 10)
+        .padding(.top, 18)
+        .frame(maxWidth: .infinity, minHeight: 96, alignment: .topLeading)
+        .background(panelFill, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+    }
+
     private var wifiSection: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            sectionHeader("Wi-Fi")
-
+        sectionPanel("Wi-Fi") {
             if let wifi = viewModel.wifiInfo {
-                glassContainer {
-                    metricRow(
-                        label: "Signal",
-                        value: "\(wifi.rssi) dBm",
-                        color: viewModel.colorForSignal(wifi.rssi),
-                        history: viewModel.wifiSignalHistory
-                    )
+                metricRow(
+                    label: "Signal",
+                    value: "\(wifi.rssi) dBm",
+                    color: viewModel.colorForSignal(wifi.rssi),
+                    history: viewModel.wifiSignalHistory
+                )
 
-                    metricRow(
-                        label: "Noise",
-                        value: "\(wifi.noise) dBm",
-                        color: viewModel.colorForNoise(wifi.noise),
-                        history: viewModel.wifiNoiseHistory
-                    )
+                metricRow(
+                    label: "Noise",
+                    value: "\(wifi.noise) dBm",
+                    color: viewModel.colorForNoise(wifi.noise),
+                    history: viewModel.wifiNoiseHistory
+                )
 
-                    metricRow(
-                        label: "Link Rate",
-                        value: formatMbps(wifi.linkRate),
-                        color: viewModel.colorForRate(wifi.linkRate, band: wifi.band),
-                        history: viewModel.wifiRateHistory
-                    )
-                }
+                metricRow(
+                    label: "Link Rate",
+                    value: formatMbps(wifi.linkRate),
+                    color: viewModel.colorForRate(wifi.linkRate, band: wifi.band),
+                    history: viewModel.wifiRateHistory
+                )
             } else {
                 Text("Connect to Wi-Fi to see signal details.")
                     .font(.system(size: 11))
@@ -177,92 +323,56 @@ struct DiagnosticsView: View {
         }
     }
 
-    private var routerSection: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            sectionHeaderInline("Router", trailingText: viewModel.gatewayIP)
-
-            glassContainer {
-                metricRow(
-                    label: "Ping",
-                    value: formatLatency(viewModel.routerLatency),
-                    color: viewModel.colorForPing(viewModel.routerLatency),
-                    history: viewModel.routerHistory
-                )
-
-                metricRow(
-                    label: "Jitter",
-                    value: formatLatency(viewModel.routerJitter),
-                    color: viewModel.colorForJitter(viewModel.routerJitter),
-                    history: viewModel.routerJitterHistory
-                )
-
-                metricRow(
-                    label: "Loss",
-                    value: formatLoss(viewModel.routerLoss),
-                    color: viewModel.colorForLoss(viewModel.routerLoss),
-                    history: viewModel.routerLossHistory
-                )
-            }
-        }
-    }
-
     private var internetSection: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            sectionHeaderInline("Internet", trailingText: "Connected to \(settings.internetPingTarget)")
+        sectionPanel("Internet") {
+            metricRow(
+                label: "Latency",
+                value: formatLatency(viewModel.internetLatency),
+                color: viewModel.colorForInternetProbe(viewModel.internetLatency),
+                history: viewModel.internetHistory
+            )
+            ThroughputRowView(
+                download: viewModel.downloadRateHistory,
+                upload: viewModel.uploadRateHistory,
+                downText: "↓ \(formatRate(viewModel.currentDownloadRate))",
+                upText: "↑ \(formatRate(viewModel.currentUploadRate))"
+            )
 
-            glassContainer {
-                metricRow(
-                    label: "Ping",
-                    value: formatLatency(viewModel.internetLatency),
-                    color: viewModel.colorForPing(viewModel.internetLatency),
-                    history: viewModel.internetHistory
-                )
-                ThroughputRowView(
-                    download: viewModel.downloadRateHistory,
-                    upload: viewModel.uploadRateHistory,
-                    downText: "↓\(formatRate(viewModel.currentDownloadRate))",
-                    upText: "↑\(formatRate(viewModel.currentUploadRate))"
-                )
+            metricRow(
+                label: "Jitter",
+                value: formatLatency(viewModel.internetJitter),
+                color: viewModel.colorForJitter(viewModel.internetJitter),
+                history: viewModel.internetJitterHistory
+            )
 
-                metricRow(
-                    label: "Jitter",
-                    value: formatLatency(viewModel.internetJitter),
-                    color: viewModel.colorForJitter(viewModel.internetJitter),
-                    history: viewModel.internetJitterHistory
-                )
-
-                metricRow(
-                    label: "Loss",
-                    value: formatLoss(viewModel.internetLoss),
-                    color: viewModel.colorForLoss(viewModel.internetLoss),
-                    history: viewModel.internetLossHistory
-                )
-            }
+            metricRow(
+                label: "Loss",
+                value: formatLoss(viewModel.internetLoss),
+                color: viewModel.colorForLoss(viewModel.internetLoss),
+                history: viewModel.internetLossHistory
+            )
         }
     }
 
     private var dnsSection: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            sectionHeader(
-                "DNS",
-                subtitle: dnsSubtitle,
-                trailing: {
-                    Button(action: viewModel.openNetworkSettings) {
-                        Image(systemName: "gearshape")
-                            .foregroundColor(.secondary)
-                    }
-                    .buttonStyle(.plain)
-                }
+        sectionPanel("DNS") {
+            metricRow(
+                label: "Lookup",
+                value: formatLatency(viewModel.dnsLatency),
+                color: viewModel.colorForDns(viewModel.dnsLatency),
+                history: viewModel.dnsHistory
             )
 
-            glassContainer {
-                metricRow(
-                    label: "Lookup",
-                    value: formatLatency(viewModel.dnsLatency),
-                    color: viewModel.colorForDns(viewModel.dnsLatency),
-                    history: viewModel.dnsHistory
-                )
+            HStack(spacing: 12) {
+                Text("Target")
+                    .font(.system(size: 14, weight: .regular))
+                Text(settings.dnsLookupHost)
+                    .font(.system(size: 14, weight: .medium, design: .monospaced))
+                    .foregroundColor(.primary)
+                    .lineLimit(1)
+                Spacer(minLength: 0)
             }
+            .frame(height: 40)
         }
     }
 
@@ -365,7 +475,45 @@ struct DiagnosticsView: View {
     }
 
     private var severeLossDetected: Bool {
-        viewModel.routerLoss >= 10 || viewModel.internetLoss >= 10
+        viewModel.internetLoss >= 10
+    }
+
+    private func sectionPanel<Content: View>(
+        _ title: String,
+        trailingText: String? = nil,
+        @ViewBuilder content: () -> Content
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(alignment: .firstTextBaseline) {
+                Text(title)
+                    .font(.system(size: 14, weight: .bold))
+                    .foregroundColor(.secondary)
+                    .textCase(.uppercase)
+                Spacer()
+                if let trailingText {
+                    Text(trailingText)
+                        .font(.system(size: 10))
+                        .foregroundColor(.secondary)
+                        .lineLimit(1)
+                }
+            }
+            .padding(.horizontal, 12)
+            .padding(.top, 14)
+            .padding(.bottom, 8)
+
+            Divider()
+                .opacity(0.55)
+                .padding(.horizontal, 12)
+
+            content()
+                .padding(.horizontal, 12)
+                .padding(.bottom, 2)
+        }
+        .background(panelFill, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .stroke(Color.secondary.opacity(0.10), lineWidth: 1)
+        )
     }
 
     private func sectionHeader(_ title: String, subtitle: String? = nil) -> some View {
@@ -418,10 +566,176 @@ struct DiagnosticsView: View {
         }
     }
 
+    private var historyHeader: some View {
+        HStack(alignment: .center, spacing: 10) {
+            Text("Data History")
+                .font(.system(size: 16, weight: .semibold))
+            Spacer()
+            Picker("History scope", selection: $historyScope) {
+                ForEach(availableHistoryScopes) { scope in
+                    Text(scope.rawValue).tag(scope)
+                }
+            }
+            .pickerStyle(.segmented)
+            .labelsHidden()
+            .frame(width: 118)
+            .accessibilityLabel("History scope")
+        }
+    }
+
+    private var historySummary: some View {
+        HStack(spacing: 8) {
+            historySummaryItem("Overall", value: formatBytes(viewModel.dataUsage.overall.total))
+            historySummaryItem("Today", value: formatBytes(viewModel.dataUsage.today.total))
+            if settings.isPerNetworkUsageEnabled {
+                historySummaryItem("This SSID", value: formatBytes(viewModel.dataUsage.currentNetworkTotals?.total ?? 0))
+            }
+        }
+    }
+
+    private func historySummaryItem(_ title: String, value: String) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(title)
+                .font(.system(size: 10, weight: .semibold))
+                .foregroundColor(.secondary)
+                .textCase(.uppercase)
+            Text(value)
+                .font(.system(size: 15, weight: .semibold, design: .monospaced))
+                .lineLimit(1)
+                .minimumScaleFactor(0.8)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(10)
+        .background(panelFill, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+    }
+
+    private var historyRecords: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(spacing: 8) {
+                Label("Last \(viewModel.dataUsage.retentionDays) days", systemImage: "calendar")
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundColor(.secondary)
+                Spacer()
+                Label(historyScope == .all ? "All traffic" : "Current SSID", systemImage: "line.3.horizontal.decrease.circle")
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundColor(.secondary)
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 9)
+
+            Divider().opacity(0.5)
+
+            if filteredHistoryRecords.isEmpty {
+                Text("No transfer records yet.")
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundColor(.secondary)
+                    .frame(maxWidth: .infinity, minHeight: 96)
+            } else {
+                ForEach(filteredHistoryRecords) { record in
+                    historyRecordRow(record)
+                }
+            }
+        }
+        .background(panelFill, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .stroke(Color.secondary.opacity(0.10), lineWidth: 1)
+        )
+    }
+
+    private func historyRecordRow(_ record: DataUsageDailyRecord) -> some View {
+        HStack(spacing: 8) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(displayDay(record.day))
+                    .font(.system(size: 12, weight: .semibold))
+                Text(record.networkName ?? "Unknown")
+                    .font(.system(size: 10, weight: .medium))
+                    .foregroundColor(.secondary)
+                    .lineLimit(1)
+            }
+            .frame(width: 100, alignment: .leading)
+
+            Spacer(minLength: 4)
+
+            Text("↓ \(formatBytes(record.totals.downloaded))")
+                .font(.system(size: 11, weight: .semibold, design: .monospaced))
+                .foregroundColor(.blue)
+                .lineLimit(1)
+            Text("↑ \(formatBytes(record.totals.uploaded))")
+                .font(.system(size: 11, weight: .semibold, design: .monospaced))
+                .foregroundColor(.purple)
+                .lineLimit(1)
+            Text(formatBytes(record.totals.total))
+                .font(.system(size: 11, weight: .semibold, design: .monospaced))
+                .lineLimit(1)
+                .frame(width: 64, alignment: .trailing)
+        }
+        .padding(.horizontal, 12)
+        .frame(height: 40)
+        .overlay(
+            Rectangle()
+                .frame(height: 1)
+                .foregroundColor(Color.secondary.opacity(0.12)),
+            alignment: .bottom
+        )
+    }
+
+    private var topNetworksSection: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            Text("Top Networks")
+                .font(.system(size: 12, weight: .bold))
+                .foregroundColor(.secondary)
+                .textCase(.uppercase)
+                .padding(.horizontal, 12)
+                .padding(.top, 12)
+                .padding(.bottom, 6)
+
+            Divider().opacity(0.5)
+                .padding(.horizontal, 12)
+
+            if viewModel.dataUsage.networks.isEmpty {
+                Text("No SSID totals yet.")
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundColor(.secondary)
+                    .frame(maxWidth: .infinity, minHeight: 42)
+            } else {
+                ForEach(viewModel.dataUsage.networks) { network in
+                    usageListRow(title: network.name, totals: network.totals)
+                        .padding(.horizontal, 12)
+                }
+            }
+        }
+        .background(panelFill, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .stroke(Color.secondary.opacity(0.10), lineWidth: 1)
+        )
+    }
+
+    private var filteredHistoryRecords: [DataUsageDailyRecord] {
+        switch historyScope {
+        case .all:
+            return viewModel.dataUsage.overallDailyRecords
+        case .ssid:
+            guard settings.isPerNetworkUsageEnabled,
+                  let currentName = viewModel.dataUsage.currentNetworkName else {
+                return []
+            }
+            return viewModel.dataUsage.networkDailyRecords.filter { $0.networkName == currentName }
+        }
+    }
+
+    private var availableHistoryScopes: [HistoryScope] {
+        if settings.isPerNetworkUsageEnabled, viewModel.dataUsage.currentNetworkName != nil {
+            return [.all, .ssid]
+        }
+        return [.all]
+    }
+
     private var settingsHeader: some View {
         HStack(spacing: 8) {
             Text("Settings")
-                .font(.system(size: 13, weight: .semibold))
+                .font(.system(size: 15, weight: .semibold))
             Spacer()
         }
     }
@@ -476,39 +790,113 @@ struct DiagnosticsView: View {
         Group {
             let shape = RoundedRectangle(cornerRadius: 18, style: .continuous)
             ZStack {
-                shape.fill(Color(NSColor.windowBackgroundColor))
-                shape.stroke(Color.secondary.opacity(0.12), lineWidth: 1)
+                shape.fill(Color(nsColor: .windowBackgroundColor))
+                shape.stroke(Color(nsColor: .separatorColor).opacity(0.65), lineWidth: 1)
             }
         }
     }
 
+    private var panelFill: some ShapeStyle {
+        Color(nsColor: .controlBackgroundColor)
+    }
+
     private var footerBar: some View {
         HStack {
-            Button(action: { withAnimation { showingSettings.toggle() } }) {
-                Image(systemName: "gearshape.fill")
-                    .foregroundColor(showingSettings ? .primary : .secondary)
+            if face != .overview {
+                Button(action: showOverview) {
+                    Image(systemName: "arrow.left")
+                        .font(.system(size: 15, weight: .medium))
+                        .foregroundColor(.secondary)
+                }
+                .buttonStyle(.plain)
+                .help("Back")
+                .accessibilityLabel("Back to overview")
+            } else {
+                Button(action: showSettings) {
+                    Image(systemName: "slider.horizontal.3")
+                        .font(.system(size: 15, weight: .medium))
+                        .foregroundColor(.secondary)
+                }
+                .buttonStyle(.plain)
+                .help("Settings")
+                .accessibilityLabel("Settings")
+
+                Button(action: showHistory) {
+                    Image(systemName: "clock.arrow.circlepath")
+                        .font(.system(size: 15, weight: .medium))
+                        .foregroundColor(.secondary)
+                }
+                .buttonStyle(.plain)
+                .help("Data History")
+                .accessibilityLabel("Data history")
             }
-            .buttonStyle(.plain)
-            .help(showingSettings ? "Back to Overview" : "Settings")
+
+            Spacer()
+
+            Text(footerTitle)
+                .font(.system(size: 12, weight: .medium))
+                .foregroundColor(.secondary)
 
             Spacer()
 
             Button(action: onQuit) {
                 Image(systemName: "power")
+                    .font(.system(size: 15, weight: .medium))
                     .foregroundColor(.secondary)
             }
             .buttonStyle(.plain)
             .help("Quit")
+            .accessibilityLabel("Quit PingBar")
         }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 6)
-        .background(Color(NSColor.windowBackgroundColor))
+        .padding(.horizontal, 22)
+        .padding(.vertical, 10)
+        .background(Color(nsColor: .controlBackgroundColor))
         .overlay(
             Rectangle()
                 .frame(height: 1)
-                .foregroundColor(Color.secondary.opacity(0.15)),
+                .foregroundColor(Color(nsColor: .separatorColor).opacity(0.65)),
             alignment: .top
         )
+    }
+
+    private func showOverview() {
+        withAnimation {
+            face = .overview
+        }
+    }
+
+    private func showSettings() {
+        withAnimation {
+            face = .settings
+        }
+    }
+
+    private func showHistory() {
+        withAnimation {
+            if !availableHistoryScopes.contains(historyScope) {
+                historyScope = .all
+            }
+            face = .history
+        }
+    }
+
+    private var footerTitle: String {
+        switch face {
+        case .overview:
+            return "Updated now"
+        case .settings:
+            return "Settings"
+        case .history:
+            return "History"
+        }
+    }
+
+    private func wifiDetailLabel(_ wifi: WiFiInfo) -> String {
+        let standardLabel = wifi.standard.rawValue.replacingOccurrences(of: "Wi-Fi ", with: "")
+        if wifi.standard == .unknown {
+            return wifi.band.rawValue
+        }
+        return "\(standardLabel) • \(wifi.band.rawValue)"
     }
 
     private func metricRow(
@@ -527,6 +915,31 @@ struct DiagnosticsView: View {
         )
     }
 
+    private func usageListRow(title: String, totals: DataUsageTotals) -> some View {
+        HStack(spacing: 8) {
+            Text(title)
+                .font(.system(size: 11, weight: .semibold))
+                .lineLimit(1)
+            Spacer(minLength: 8)
+            Text(formatBytes(totals.total))
+                .font(.system(size: 11, weight: .semibold, design: .monospaced))
+                .foregroundColor(.secondary)
+                .lineLimit(1)
+        }
+        .frame(height: 24)
+    }
+
+    private func transferSplit(_ totals: DataUsageTotals) -> some View {
+        HStack(spacing: 8) {
+            Text("↓ \(formatBytes(totals.downloaded))")
+                .foregroundColor(.blue)
+            Text("↑ \(formatBytes(totals.uploaded))")
+                .foregroundColor(.purple)
+        }
+        .font(.system(size: 11, weight: .semibold, design: .monospaced))
+        .lineLimit(1)
+    }
+
     private var dnsSubtitle: String {
         if let first = viewModel.dnsServers.first {
             return "Router assigned (\(first))"
@@ -537,13 +950,16 @@ struct DiagnosticsView: View {
     private func formatLatency(_ ms: Double?) -> String {
         guard let ms = ms else { return "---" }
         if ms >= 1000 {
-            return String(format: "%.1fs", ms / 1000)
+            return String(format: "%.1f s", ms / 1000)
         }
-        return "\(Int(ms.rounded()))ms"
+        return "\(Int(ms.rounded())) ms"
     }
 
     private func formatLoss(_ loss: Double) -> String {
-        String(format: "%.1f%%", loss)
+        if loss.rounded() == loss {
+            return "\(Int(loss))%"
+        }
+        return String(format: "%.1f%%", loss)
     }
 
     private func formatRate(_ bytesPerSecond: Double?) -> String {
@@ -553,12 +969,38 @@ struct DiagnosticsView: View {
             return String(format: "%.1f Gbps", bitsPerSecond / 1_000_000_000)
         }
         if bitsPerSecond >= 1_000_000 {
-            return String(format: "%.1f Mbps", bitsPerSecond / 1_000_000)
+            let mbps = bitsPerSecond / 1_000_000
+            if mbps >= 100 || mbps.rounded() == mbps {
+                return String(format: "%.0f Mbps", mbps)
+            }
+            return String(format: "%.1f Mbps", mbps)
         }
         if bitsPerSecond >= 1_000 {
             return String(format: "%.0f Kbps", bitsPerSecond / 1_000)
         }
         return String(format: "%.0f bps", bitsPerSecond)
+    }
+
+    private func formatBytes(_ bytes: UInt64) -> String {
+        let value = Double(bytes)
+        if value >= 1_000_000_000 {
+            return String(format: "%.1f GB", value / 1_000_000_000)
+        }
+        if value >= 1_000_000 {
+            return String(format: "%.1f MB", value / 1_000_000)
+        }
+        if value >= 1_000 {
+            return String(format: "%.0f KB", value / 1_000)
+        }
+        return "\(bytes) B"
+    }
+
+    private func displayDay(_ day: String) -> String {
+        guard let date = Self.dayFormatter.date(from: day) else { return day }
+        if Calendar.current.isDateInToday(date) {
+            return "Today"
+        }
+        return Self.displayDayFormatter.string(from: date)
     }
 
 
@@ -574,4 +1016,16 @@ struct DiagnosticsView: View {
         }
         return String(format: "%.2f Mbps", mbps)
     }
+
+    private static let dayFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "yyyy-MM-dd"
+        return formatter
+    }()
+
+    private static let displayDayFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "MMM d"
+        return formatter
+    }()
 }

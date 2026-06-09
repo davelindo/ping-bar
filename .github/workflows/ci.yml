@@ -1,19 +1,35 @@
 name: CI
 
 on:
-  push:
-    branches: [main]
   pull_request:
-    branches: [main]
+  push:
+    branches:
+      - main
 
 jobs:
-  build:
-    runs-on: macos-14
-    steps:
-      - uses: actions/checkout@v4
+  build-test:
+    runs-on: macos-latest
 
-      - name: Build
-        run: swift build -c release
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Swift test
+        run: swift test
+
+      - name: Swift build with warnings as errors
+        run: swift build -Xswiftc -warnings-as-errors
+
+      - name: Validate shell script syntax
+        run: |
+          bash -n scripts/build-app.sh
+          bash -n scripts/build-signed.sh
+
+      - name: Install ShellCheck
+        run: brew install shellcheck
+
+      - name: ShellCheck scripts
+        run: shellcheck scripts/*.sh
 
       - name: Build app bundle
         run: ./scripts/build-app.sh

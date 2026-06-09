@@ -5,69 +5,44 @@ struct ThroughputRowView: View {
     let upload: [Double?]
     let downText: String
     let upText: String
-    private let rowHeight: CGFloat = 34
+    private let rowHeight: CGFloat = 40
 
     var body: some View {
-        ZStack(alignment: .leading) {
+        HStack(spacing: 12) {
+            Text("Throughput")
+                .font(.system(size: 14, weight: .regular))
+                .foregroundColor(.primary)
+                .lineLimit(1)
+                .minimumScaleFactor(0.86)
+                .frame(width: 94, alignment: .leading)
+
+            HStack(spacing: 6) {
+                Text(downText)
+                    .font(.system(size: 13, weight: .semibold, design: .monospaced))
+                    .foregroundColor(.blue)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.75)
+                Text(upText)
+                    .font(.system(size: 13, weight: .semibold, design: .monospaced))
+                    .foregroundColor(.purple)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.75)
+            }
+            .frame(width: 150, alignment: .leading)
+
+            Spacer(minLength: 4)
+
             ThroughputGraphView(download: download, upload: upload)
-                .opacity(0.65)
-                .frame(height: 22)
-                .frame(maxWidth: .infinity, alignment: .leading)
-
-            HStack {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("Throughput")
-                        .font(.system(size: 10, weight: .medium))
-                        .foregroundColor(.secondary)
-                    VStack(alignment: .leading, spacing: 1) {
-                        Text(downText)
-                            .font(.system(size: 14, weight: .semibold, design: .monospaced))
-                            .foregroundColor(.primary)
-                        Text(upText)
-                            .font(.system(size: 14, weight: .semibold, design: .monospaced))
-                            .foregroundColor(.secondary)
-                    }
-                }
-                .anchorPreference(key: ThroughputLabelBoundsKey.self, value: .bounds) { $0 }
-
-                Spacer()
-            }
-            .backgroundPreferenceValue(ThroughputLabelBoundsKey.self) { anchor in
-                GeometryReader { proxy in
-                    if let anchor {
-                        let rect = paddedRect(proxy[anchor])
-                        BlurEffectView(material: .hudWindow)
-                            .frame(width: rect.width, height: rect.height)
-                            .position(x: rect.midX, y: rect.midY)
-                            .clipShape(RoundedRectangle(cornerRadius: 4, style: .continuous))
-                            .allowsHitTesting(false)
-                    }
-                }
-            }
+                .frame(minWidth: 50, maxWidth: .infinity, minHeight: 24, maxHeight: 24)
+                .accessibilityHidden(true)
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
         .frame(height: rowHeight)
-        .padding(.vertical, 4)
-    }
-
-    private func paddedRect(_ rect: CGRect) -> CGRect {
-        let paddingX: CGFloat = 6
-        let paddingY: CGFloat = 6
-        let maskWidth = rect.width + paddingX
-        let maskHeight = min(rect.height + paddingY, rowHeight)
-        return CGRect(
-            x: rect.minX - paddingX / 2,
-            y: rect.midY - maskHeight / 2,
-            width: maskWidth,
-            height: maskHeight
+        .accessibilityElement(children: .combine)
+        .overlay(
+            Rectangle()
+                .frame(height: 1)
+                .foregroundColor(Color.secondary.opacity(0.14)),
+            alignment: .bottom
         )
-    }
-}
-
-private struct ThroughputLabelBoundsKey: PreferenceKey {
-    static var defaultValue: Anchor<CGRect>? = nil
-
-    static func reduce(value: inout Anchor<CGRect>?, nextValue: () -> Anchor<CGRect>?) {
-        value = nextValue() ?? value
     }
 }

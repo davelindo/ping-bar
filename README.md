@@ -13,8 +13,9 @@ Network diagnostics in your menu bar. Monitor latency, WiFi signal, and connecti
 - **Menu bar latency or throughput** - Live ping or up/down rates in the menu bar
 - **Wi‑Fi details** - Network name, signal strength, noise floor, link rate, band, and Wi‑Fi standard
 - **Router ping** - Latency to gateway with jitter, packet loss, and sparkline history
-- **Internet ping** - Latency to 1.1.1.1 with jitter, packet loss, and sparkline history
+- **Internet probe** - TCP latency to 1.1.1.1 with jitter, packet loss, and sparkline history
 - **Throughput graph** - Live up/down history and total transfer counters
+- **Data usage history** - Daily and per-SSID usage totals with retention controls
 - **DNS lookup** - Resolution time for cloudflare.com with sparkline history
 - **Speed test** - Cloudflare-based download/upload with lag-under-load rating
 - **Captive portal detection** - Alerts when network login is required
@@ -33,6 +34,12 @@ cd ping-bar
 ./scripts/build-app.sh
 ```
 
+To build with an installed Xcode beta:
+
+```bash
+DEVELOPER_DIR=/Applications/Xcode-beta.app/Contents/Developer ./scripts/build-app.sh
+```
+
 ## Color Coding
 
 | Metric | Green | Orange | Red |
@@ -44,6 +51,7 @@ cd ping-bar
 ## Requirements
 
 - macOS 13+
+- Xcode 26.5+ or Xcode 27 beta for local builds
 - Location permission (optional, for WiFi network name)
 
 ## License

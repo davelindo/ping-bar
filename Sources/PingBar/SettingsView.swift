@@ -7,59 +7,90 @@ struct SettingsView: View {
     @StateObject private var viewModel = SettingsViewModel()
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
+        VStack(alignment: .leading, spacing: 16) {
             sectionHeader("General")
 
-            Toggle("Launch at Login", isOn: Binding(
-                get: { viewModel.launchAtLogin },
-                set: { viewModel.setLaunchAtLogin($0) }
-            ))
+            settingsToggle(
+                "Launch at Login",
+                isOn: Binding(
+                    get: { viewModel.launchAtLogin },
+                    set: { viewModel.setLaunchAtLogin($0) }
+                )
+            )
 
             Divider()
 
             sectionHeader("Diagnostics")
 
-            VStack(alignment: .leading, spacing: 8) {
-                HStack {
-                    Text("Menu bar display")
-                        .font(.system(size: 11))
-                    Spacer()
-                    Picker("", selection: $settings.statusBarDisplayMode) {
+            VStack(alignment: .leading, spacing: 10) {
+                settingsRow("Menu bar display") {
+                    Picker("Menu bar display", selection: $settings.statusBarDisplayMode) {
                         ForEach(StatusBarDisplayMode.allCases) { mode in
                             Text(mode.label).tag(mode)
                         }
                     }
                     .labelsHidden()
-                    .frame(width: 140)
+                    .frame(width: 136)
+                    .accessibilityLabel("Menu bar display")
                 }
 
-                HStack {
-                    Text("Internet ping target")
-                        .font(.system(size: 11))
-                    Spacer()
+                settingsRow("Internet ping target") {
                     TextField(SettingsStore.defaultInternetPingTarget, text: $settings.internetPingTarget)
                         .textFieldStyle(.roundedBorder)
-                        .frame(width: 140)
+                        .frame(width: 136)
                 }
 
-                HStack {
-                    Text("DNS lookup host")
-                        .font(.system(size: 11))
-                    Spacer()
+                settingsRow("DNS lookup host") {
                     TextField(SettingsStore.defaultDnsLookupHost, text: $settings.dnsLookupHost)
                         .textFieldStyle(.roundedBorder)
-                        .frame(width: 140)
+                        .frame(width: 136)
                 }
 
                 samplingPicker(
                     title: "Sampling interval (open)",
+                    values: [1, 2, 5, 10, 15, 30],
                     selection: intervalBinding(for: \.samplingIntervalOpen)
                 )
 
                 samplingPicker(
                     title: "Sampling interval (closed)",
+                    values: [5, 10, 15, 30, 60],
                     selection: intervalBinding(for: \.samplingIntervalClosed)
                 )
+            }
+
+            Divider()
+
+            sectionHeader("Data Usage")
+
+            VStack(alignment: .leading, spacing: 10) {
+                settingsToggle("Record Usage History", isOn: $settings.isDataUsageHistoryEnabled)
+
+                settingsToggle("Per-SSID Totals", isOn: $settings.isPerNetworkUsageEnabled)
+                    .disabled(!settings.isDataUsageHistoryEnabled)
+
+                settingsRow("History retention") {
+                    Picker("History retention", selection: $settings.dataUsageRetentionDays) {
+                        Text("7d").tag(7)
+                        Text("30d").tag(30)
+                        Text("90d").tag(90)
+                        Text("1y").tag(365)
+                    }
+                    .labelsHidden()
+                    .frame(width: 84)
+                    .disabled(!settings.isDataUsageHistoryEnabled)
+                    .accessibilityLabel("History retention")
+                }
+
+                settingsRow("Stored records") {
+                    Button(action: diagnosticsViewModel.clearDataUsageHistory) {
+                        Image(systemName: "trash")
+                            .font(.system(size: 12, weight: .semibold))
+                    }
+                    .buttonStyle(.bordered)
+                    .help("Clear Data Usage History")
+                    .accessibilityLabel("Clear data usage history")
+                }
             }
 
             Divider()
@@ -71,9 +102,35 @@ struct SettingsView: View {
 
     private func sectionHeader(_ title: String) -> some View {
         Text(title)
-            .font(.system(size: 11, weight: .semibold))
+            .font(.system(size: 12, weight: .bold))
             .foregroundColor(.secondary)
             .textCase(.uppercase)
+    }
+
+    private func settingsToggle(_ title: String, isOn: Binding<Bool>) -> some View {
+        HStack(spacing: 10) {
+            Toggle(title, isOn: isOn)
+                .font(.system(size: 12, weight: .medium))
+                .lineLimit(1)
+            Spacer(minLength: 0)
+        }
+        .frame(height: 28)
+    }
+
+    private func settingsRow<Control: View>(
+        _ title: String,
+        @ViewBuilder control: () -> Control
+    ) -> some View {
+        HStack(spacing: 16) {
+            Text(title)
+                .font(.system(size: 12, weight: .medium))
+                .lineLimit(1)
+                .minimumScaleFactor(0.9)
+                .frame(width: 170, alignment: .leading)
+            Spacer(minLength: 0)
+            control()
+        }
+        .frame(height: 28)
     }
 
     private func intervalBinding(for keyPath: ReferenceWritableKeyPath<SettingsStore, Double>) -> Binding<Int> {
@@ -83,18 +140,16 @@ struct SettingsView: View {
         )
     }
 
-    private func samplingPicker(title: String, selection: Binding<Int>) -> some View {
-        HStack {
-            Text(title)
-                .font(.system(size: 11))
-            Spacer()
+    private func samplingPicker(title: String, values: [Int], selection: Binding<Int>) -> some View {
+        settingsRow(title) {
             Picker(title, selection: selection) {
-                ForEach([1, 2, 5, 10, 15, 30], id: \.self) { value in
+                ForEach(values, id: \.self) { value in
                     Text("\(value)s").tag(value)
                 }
             }
             .labelsHidden()
-            .frame(width: 80)
+            .frame(width: 84)
+            .accessibilityLabel(title)
         }
     }
 
@@ -104,7 +159,7 @@ struct SettingsView: View {
                 Image(systemName: "speedometer")
                     .font(.system(size: 12, weight: .semibold))
                 Text("Speed Test")
-                    .font(.system(size: 12, weight: .semibold))
+                    .font(.system(size: 13, weight: .semibold))
                 Spacer()
                 if case .running = diagnosticsViewModel.speedTestState {
                     Button(action: diagnosticsViewModel.cancelSpeedTest) {
@@ -126,7 +181,7 @@ struct SettingsView: View {
                     .help("Run Speed Test")
 
                     Text("Run a quick throughput check")
-                        .font(.system(size: 11))
+                        .font(.system(size: 12))
                         .foregroundColor(.secondary)
                 }
             case .running(let phase):

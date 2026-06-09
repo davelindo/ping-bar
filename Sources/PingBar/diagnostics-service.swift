@@ -1,11 +1,12 @@
 import Foundation
 
-final class DiagnosticsService {
+final class DiagnosticsService: @unchecked Sendable {
     let wifiService = WiFiService()
     private(set) var dnsService = DNSService()
     let captivePortalService = CaptivePortalService()
     let locationManager = LocationManager()
     private let throughputService = ThroughputService()
+    private let dataUsageStore = DataUsageStore()
 
     private var routerPingService: PingService?
     private var internetPingService: PingService?
@@ -29,19 +30,30 @@ final class DiagnosticsService {
     private var timer: Timer?
     private var captivePortalTimer: Timer?
     private var tickInterval: TimeInterval = 10.0
+    private let captivePortalInterval: TimeInterval = 60.0
     private(set) var isRunning = false
+    private var isDetailedSamplingEnabled = false
+    private var isTickInFlight = false
+    private var pendingDetailedTick = false
+    private var isDataUsageHistoryEnabled = true
+    private var isPerNetworkUsageEnabled = true
     private(set) var gatewayIP: String?
     private(set) var defaultRouteInterface: String?
     private(set) var defaultRoutePortName: String?
+    private(set) var currentNetworkName: String?
+    private(set) var currentWiFiInterfaceName: String?
     private(set) var captivePortalStatus: CaptivePortalStatus = .unknown
     private(set) var dnsServers: [String] = []
     private(set) var currentDownloadRate: Double?
     private(set) var currentUploadRate: Double?
     private(set) var totalDownloaded: Double?
     private(set) var totalUploaded: Double?
+    private(set) var dataUsageSnapshot = DataUsageSnapshot()
 
     private var throughputBaseline: ThroughputSample?
     private var lastThroughputSample: ThroughputSample?
+    private var sessionDownloadedBytes: UInt64 = 0
+    private var sessionUploadedBytes: UInt64 = 0
 
     var onUpdate: (() -> Void)?
     private lazy var interfacePortMap: [String: String] = loadInterfacePortMap()
@@ -57,15 +69,17 @@ final class DiagnosticsService {
         isRunning = true
 
         updateRouteInfo()
-        internetPingService = PingService(target: internetTarget)
+        internetPingService = PingService(target: internetTarget, backend: .tcpConnect(port: 443))
+        refreshDataUsageSnapshot()
 
         checkCaptivePortal()
         tick()
         scheduleTickTimer()
-        captivePortalTimer = Timer.scheduledTimer(withTimeInterval: 10.0, repeats: true) { [weak self] _ in
+        captivePortalTimer = Timer.scheduledTimer(withTimeInterval: captivePortalInterval, repeats: true) { [weak self] _ in
             self?.updateRouteInfo()
             self?.checkCaptivePortal()
         }
+        captivePortalTimer?.tolerance = 10.0
     }
 
     func stop() {
@@ -74,9 +88,14 @@ final class DiagnosticsService {
         captivePortalTimer?.invalidate()
         captivePortalTimer = nil
         isRunning = false
+        flushDataUsage()
         clear()
         captivePortalStatus = .unknown
         onUpdate?()
+    }
+
+    func shutdown() {
+        flushDataUsage()
     }
 
     func setSamplingInterval(_ interval: TimeInterval, tickImmediately: Bool = false) {
@@ -87,15 +106,42 @@ final class DiagnosticsService {
             scheduleTickTimer()
         }
         if tickImmediately {
-            tick()
+            tick(forceDetailed: isDetailedSamplingEnabled)
         }
+    }
+
+    func setDetailedSamplingEnabled(_ enabled: Bool) {
+        isDetailedSamplingEnabled = enabled
+        if enabled {
+            refreshDataUsageSnapshot()
+        }
+    }
+
+    func setDataUsageHistoryEnabled(_ enabled: Bool) {
+        isDataUsageHistoryEnabled = enabled
+        refreshDataUsageSnapshot()
+    }
+
+    func setPerNetworkUsageEnabled(_ enabled: Bool) {
+        isPerNetworkUsageEnabled = enabled
+        refreshDataUsageSnapshot()
+    }
+
+    func setDataUsageRetentionDays(_ days: Int) {
+        dataUsageStore.setRetentionDays(days)
+        refreshDataUsageSnapshot()
+    }
+
+    func clearDataUsageHistory() {
+        dataUsageStore.clear()
+        refreshDataUsageSnapshot()
     }
 
     func updateInternetTarget(_ target: String) {
         let trimmed = target.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty, trimmed != internetTarget else { return }
         internetTarget = trimmed
-        internetPingService = PingService(target: trimmed)
+        internetPingService = PingService(target: trimmed, backend: .tcpConnect(port: 443))
     }
 
     func updateDnsHostname(_ hostname: String) {
@@ -112,6 +158,7 @@ final class DiagnosticsService {
         }
     }
 
+    @MainActor
     func openCaptivePortalLogin() {
         if case .captivePortal(let url) = captivePortalStatus {
             captivePortalService.openLoginPage(url: url)
@@ -126,30 +173,58 @@ final class DiagnosticsService {
         locationManager.isAuthorized
     }
 
-    private func tick() {
+    private func tick(forceDetailed: Bool = false) {
+        guard !isTickInFlight else {
+            if forceDetailed {
+                pendingDetailedTick = true
+            }
+            return
+        }
+        isTickInFlight = true
+        let detailed = isDetailedSamplingEnabled || forceDetailed
+        let routeInterface = defaultRouteInterface
+
         DispatchQueue.global(qos: .background).async { [weak self] in
             guard let self = self else { return }
 
-            let wifiInfo = self.wifiService.getCurrentInfo()
-            let routerLatency = self.routerPingService?.executePing()
+            let wifiInfo = detailed ? self.wifiService.getCurrentInfo() : nil
+            let wifiIdentity = wifiInfo.map { WiFiIdentity(ssid: $0.ssid, interfaceName: $0.interfaceName) }
+                ?? self.wifiService.getCurrentIdentity()
+            let routerLatency = detailed ? self.routerPingService?.executePing() : nil
             let internetLatency = self.internetPingService?.executePing()
-            let dnsLatency = self.dnsService.lookup()
-            let throughputSample = self.throughputService.sample(interfaceName: self.defaultRouteInterface)
+            let dnsLatency = detailed ? self.dnsService.lookup() : nil
+            let throughputSample = self.throughputService.sample(interfaceName: routeInterface)
 
             DispatchQueue.main.async {
-                self.wifiInfo = wifiInfo
-                self.wifiSignalHistory.add(wifiInfo.map { Double($0.rssi) })
-                self.wifiNoiseHistory.add(wifiInfo.map { Double($0.noise) })
-                self.wifiRateHistory.add(wifiInfo.map { $0.linkRate })
-                self.routerHistory.add(routerLatency)
                 self.internetHistory.add(internetLatency)
-                self.dnsHistory.add(dnsLatency)
-                self.routerJitterHistory.add(self.routerHistory.jitter)
-                self.internetJitterHistory.add(self.internetHistory.jitter)
-                self.routerLossHistory.add(routerLatency == nil ? 100 : 0)
-                self.internetLossHistory.add(internetLatency == nil ? 100 : 0)
+                if detailed {
+                    self.wifiInfo = wifiInfo
+                    self.wifiSignalHistory.add(wifiInfo.map { Double($0.rssi) })
+                    self.wifiNoiseHistory.add(wifiInfo.map { Double($0.noise) })
+                    self.wifiRateHistory.add(wifiInfo.map { $0.linkRate })
+                    self.routerHistory.add(routerLatency)
+                    self.dnsHistory.add(dnsLatency)
+                    self.routerJitterHistory.add(self.routerHistory.jitter)
+                    self.internetJitterHistory.add(self.internetHistory.jitter)
+                    self.routerLossHistory.add(routerLatency == nil ? 100 : 0)
+                    self.internetLossHistory.add(internetLatency == nil ? 100 : 0)
+                } else {
+                    self.recordDetailedSamplingGap()
+                }
+                self.applyWiFiIdentity(wifiIdentity)
                 self.updateThroughput(sample: throughputSample)
-                self.onUpdate?()
+                if detailed {
+                    self.refreshDataUsageSnapshot()
+                }
+                self.isTickInFlight = false
+                let runPendingDetailedTick = self.pendingDetailedTick
+                self.pendingDetailedTick = false
+                if runPendingDetailedTick {
+                    self.onUpdate?()
+                    self.tick(forceDetailed: true)
+                } else {
+                    self.onUpdate?()
+                }
             }
         }
     }
@@ -193,7 +268,7 @@ final class DiagnosticsService {
         if routeInfo.gateway != gatewayIP {
             gatewayIP = routeInfo.gateway
             if let gateway = gatewayIP {
-                routerPingService = PingService(target: gateway)
+                routerPingService = PingService(target: gateway, backend: .systemPing)
             } else {
                 routerPingService = nil
             }
@@ -212,6 +287,8 @@ final class DiagnosticsService {
 
     func clear() {
         wifiInfo = nil
+        currentNetworkName = nil
+        currentWiFiInterfaceName = nil
         routerHistory.clear()
         internetHistory.clear()
         dnsHistory.clear()
@@ -233,6 +310,7 @@ final class DiagnosticsService {
         timer = Timer.scheduledTimer(withTimeInterval: tickInterval, repeats: true) { [weak self] _ in
             self?.tick()
         }
+        timer?.tolerance = max(0.2, tickInterval * 0.15)
     }
 
     private func resetThroughput() {
@@ -242,8 +320,50 @@ final class DiagnosticsService {
         currentUploadRate = nil
         totalDownloaded = nil
         totalUploaded = nil
+        sessionDownloadedBytes = 0
+        sessionUploadedBytes = 0
         downloadRateHistory.clear()
         uploadRateHistory.clear()
+    }
+
+    private func recordDetailedSamplingGap() {
+        wifiSignalHistory.add(nil)
+        wifiNoiseHistory.add(nil)
+        wifiRateHistory.add(nil)
+        routerHistory.add(nil)
+        dnsHistory.add(nil)
+        routerJitterHistory.add(nil)
+        internetJitterHistory.add(nil)
+        routerLossHistory.add(nil)
+        internetLossHistory.add(nil)
+    }
+
+    private func applyWiFiIdentity(_ identity: WiFiIdentity?) {
+        let nextName = identity?.ssid?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let normalizedName = nextName?.isEmpty == false ? nextName : nil
+        let nextInterface = identity?.interfaceName
+        if normalizedName != currentNetworkName || nextInterface != currentWiFiInterfaceName {
+            currentNetworkName = normalizedName
+            currentWiFiInterfaceName = nextInterface
+            resetThroughput()
+        }
+    }
+
+    private func networkNameForAccounting() -> String? {
+        guard isPerNetworkUsageEnabled,
+              let routeInterface = defaultRouteInterface,
+              routeInterface == currentWiFiInterfaceName else {
+            return nil
+        }
+        return currentNetworkName
+    }
+
+    private func refreshDataUsageSnapshot() {
+        dataUsageSnapshot = dataUsageStore.snapshot(currentNetworkName: currentNetworkName)
+    }
+
+    private func flushDataUsage() {
+        dataUsageStore.flush()
     }
 
     private func updateThroughput(sample: ThroughputSample?) {
@@ -264,33 +384,56 @@ final class DiagnosticsService {
             currentUploadRate = nil
             totalDownloaded = 0
             totalUploaded = 0
+            sessionDownloadedBytes = 0
+            sessionUploadedBytes = 0
             return
         }
 
         if let last = lastThroughputSample {
             let deltaTime = sample.timestamp.timeIntervalSince(last.timestamp)
             if deltaTime > 0 {
-                let deltaIn = Int64(sample.inBytes) - Int64(last.inBytes)
-                let deltaOut = Int64(sample.outBytes) - Int64(last.outBytes)
-                if deltaIn >= 0, deltaOut >= 0 {
+                let deltaIn = throughputDelta(current: sample.inBytes, previous: last.inBytes, counterMaximum: last.counterMaximum)
+                let deltaOut = throughputDelta(current: sample.outBytes, previous: last.outBytes, counterMaximum: last.counterMaximum)
+                if let deltaIn, let deltaOut {
                     currentDownloadRate = Double(deltaIn) / deltaTime
                     currentUploadRate = Double(deltaOut) / deltaTime
+                    sessionDownloadedBytes = sessionDownloadedBytes.saturatingAdd(deltaIn)
+                    sessionUploadedBytes = sessionUploadedBytes.saturatingAdd(deltaOut)
+                    totalDownloaded = Double(sessionDownloadedBytes)
+                    totalUploaded = Double(sessionUploadedBytes)
+                    if isDataUsageHistoryEnabled {
+                        dataUsageStore.record(
+                            downloaded: deltaIn,
+                            uploaded: deltaOut,
+                            networkName: networkNameForAccounting(),
+                            now: sample.timestamp
+                        )
+                    }
                 } else {
+                    AppLog.throughput.error("Interface counter reset detected on \(self.defaultRouteInterface ?? "unknown", privacy: .public); resetting throughput baseline")
                     resetThroughput()
+                    throughputBaseline = sample
+                    lastThroughputSample = sample
+                    totalDownloaded = 0
+                    totalUploaded = 0
+                    downloadRateHistory.add(nil)
+                    uploadRateHistory.add(nil)
+                    return
                 }
             }
-        }
-
-        if let baseline = throughputBaseline {
-            let totalIn = Int64(sample.inBytes) - Int64(baseline.inBytes)
-            let totalOut = Int64(sample.outBytes) - Int64(baseline.outBytes)
-            totalDownloaded = totalIn >= 0 ? Double(totalIn) : nil
-            totalUploaded = totalOut >= 0 ? Double(totalOut) : nil
         }
 
         lastThroughputSample = sample
         downloadRateHistory.add(currentDownloadRate)
         uploadRateHistory.add(currentUploadRate)
+    }
+
+    private func throughputDelta(current: UInt64, previous: UInt64, counterMaximum: UInt64?) -> UInt64? {
+        let delta = ThroughputCounter.delta(current: current, previous: previous, counterMaximum: counterMaximum)
+        if delta != nil, current < previous {
+            AppLog.throughput.error("Counter wrap detected on \(self.defaultRouteInterface ?? "unknown", privacy: .public); applying wrap correction")
+        }
+        return delta
     }
 
     private func loadInterfacePortMap() -> [String: String] {

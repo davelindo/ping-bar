@@ -66,8 +66,19 @@ struct WiFiInfo: Equatable {
     }
 }
 
+struct WiFiIdentity: Equatable {
+    let ssid: String?
+    let interfaceName: String?
+}
+
 final class WiFiService {
     private let client = CWWiFiClient.shared()
+
+    func getCurrentIdentity() -> WiFiIdentity? {
+        guard let interface = client.interface() else { return nil }
+        guard interface.powerOn() else { return nil }
+        return WiFiIdentity(ssid: interface.ssid(), interfaceName: interface.interfaceName)
+    }
 
     func getCurrentInfo() -> WiFiInfo? {
         guard let interface = client.interface() else { return nil }

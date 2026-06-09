@@ -6,80 +6,51 @@ struct MetricRowView: View {
     let color: Color
     let history: [Double?]
     var subtitle: String? = nil
-    private let rowHeight: CGFloat = 34
+    private let rowHeight: CGFloat = 40
 
     var body: some View {
-        ZStack(alignment: .leading) {
-            chartLayer(opacity: 0.65)
+        HStack(spacing: 12) {
+            Text(label)
+                .font(.system(size: 14, weight: .regular))
+                .foregroundColor(.primary)
+                .lineLimit(1)
+                .minimumScaleFactor(0.86)
+                .frame(width: 94, alignment: .leading)
 
-            HStack {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(label)
-                        .font(.system(size: 11, weight: .medium))
+            HStack(alignment: .firstTextBaseline, spacing: 4) {
+                Text(value)
+                    .font(.system(size: 15, weight: .semibold, design: .monospaced))
+                    .foregroundColor(color)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.8)
+                if let sub = subtitle {
+                    Text(sub)
+                        .font(.system(size: 10))
                         .foregroundColor(.secondary)
-                    HStack(alignment: .firstTextBaseline, spacing: 4) {
-                        Text(value)
-                            .font(.system(size: 16, weight: .semibold, design: .monospaced))
-                            .foregroundColor(color)
-                        if let sub = subtitle {
-                            Text(sub)
-                                .font(.system(size: 10))
-                                .foregroundColor(.secondary)
-                        }
-                    }
                 }
-                .anchorPreference(key: LabelBoundsKey.self, value: .bounds) { $0 }
+            }
+            .frame(width: 92, alignment: .leading)
 
-                Spacer()
-            }
-            .backgroundPreferenceValue(LabelBoundsKey.self) { anchor in
-                GeometryReader { proxy in
-                    if let anchor {
-                        blurPatch(rect: paddedRect(proxy[anchor]))
-                    }
-                }
-            }
+            Spacer(minLength: 4)
+
+            SparklineView(
+                values: history,
+                color: color,
+                height: 22,
+                lineWidth: 1.3,
+                lineOpacity: 0.86,
+                fillOpacity: 0.11
+            )
+            .frame(minWidth: 68)
+            .accessibilityHidden(true)
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
         .frame(height: rowHeight)
-        .padding(.vertical, 4)
-    }
-
-    private func chartLayer(opacity: Double) -> some View {
-        SparklineView(values: history, color: color, height: 28)
-            .opacity(opacity)
-            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
-    }
-
-    private func paddedRect(_ rect: CGRect) -> CGRect {
-        let paddingX: CGFloat = 6
-        let paddingY: CGFloat = 6
-        let maskWidth = rect.width + paddingX
-        let maskHeight = min(rect.height + paddingY, rowHeight)
-        return CGRect(
-            x: rect.minX - paddingX / 2,
-            y: rect.midY - maskHeight / 2,
-            width: maskWidth,
-            height: maskHeight
+        .accessibilityElement(children: .combine)
+        .overlay(
+            Rectangle()
+                .frame(height: 1)
+                .foregroundColor(Color.secondary.opacity(0.14)),
+            alignment: .bottom
         )
-    }
-
-    private func blurPatch(rect: CGRect) -> some View {
-        ZStack {
-            BlurEffectView(material: .hudWindow)
-            Color.black.opacity(0.12)
-        }
-        .frame(width: rect.width, height: rect.height)
-        .position(x: rect.midX, y: rect.midY)
-        .clipShape(RoundedRectangle(cornerRadius: 4, style: .continuous))
-        .allowsHitTesting(false)
-    }
-}
-
-private struct LabelBoundsKey: PreferenceKey {
-    static var defaultValue: Anchor<CGRect>? = nil
-
-    static func reduce(value: inout Anchor<CGRect>?, nextValue: () -> Anchor<CGRect>?) {
-        value = nextValue() ?? value
     }
 }

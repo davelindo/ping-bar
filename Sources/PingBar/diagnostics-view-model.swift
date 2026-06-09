@@ -69,6 +69,7 @@ struct DiagnosticsSnapshot: Equatable {
     var currentUploadRate: Double?
     var totalDownloaded: Double?
     var totalUploaded: Double?
+    var dataUsage = DataUsageSnapshot()
 }
 
 @MainActor
@@ -116,7 +117,8 @@ final class DiagnosticsViewModel: ObservableObject {
             currentDownloadRate: service.currentDownloadRate,
             currentUploadRate: service.currentUploadRate,
             totalDownloaded: service.totalDownloaded,
-            totalUploaded: service.totalUploaded
+            totalUploaded: service.totalUploaded,
+            dataUsage: service.dataUsageSnapshot
         )
 
         if newSnapshot != snapshot {
@@ -151,6 +153,7 @@ final class DiagnosticsViewModel: ObservableObject {
     var currentUploadRate: Double? { snapshot.currentUploadRate }
     var totalDownloaded: Double? { snapshot.totalDownloaded }
     var totalUploaded: Double? { snapshot.totalUploaded }
+    var dataUsage: DataUsageSnapshot { snapshot.dataUsage }
 
     var routerLoss: Double {
         snapshot.routerLoss
@@ -220,6 +223,11 @@ final class DiagnosticsViewModel: ObservableObject {
         service.requestLocationPermission()
     }
 
+    func clearDataUsageHistory() {
+        service.clearDataUsageHistory()
+        refresh()
+    }
+
     func openCaptivePortalLogin() {
         service.openCaptivePortalLogin()
     }
@@ -257,7 +265,21 @@ final class DiagnosticsViewModel: ObservableObject {
     }
 
     func colorForPing(_ ms: Double?) -> Color {
-        return ms == nil ? .secondary : .primary
+        guard let ms = ms else { return .secondary }
+        switch ms {
+        case ..<50: return .green
+        case ..<150: return .orange
+        default: return .red
+        }
+    }
+
+    func colorForInternetProbe(_ ms: Double?) -> Color {
+        guard let ms = ms else { return .secondary }
+        switch ms {
+        case ..<100: return .green
+        case ..<300: return .orange
+        default: return .red
+        }
     }
 
     func colorForJitter(_ ms: Double?) -> Color {
