@@ -5,6 +5,7 @@ struct ThroughputSample {
     let timestamp: Date
     let inBytes: UInt64
     let outBytes: UInt64
+    let counterMaximum: UInt64?
 }
 
 final class ThroughputService {
@@ -13,9 +14,13 @@ final class ThroughputService {
         if let sample = sample64(interfaceName: interfaceName) {
             return sample
         }
+        AppLog.throughput.error("Falling back to getifaddrs counters for interface \(interfaceName, privacy: .public)")
 
         var addrs: UnsafeMutablePointer<ifaddrs>?
-        guard getifaddrs(&addrs) == 0, let first = addrs else { return nil }
+        guard getifaddrs(&addrs) == 0, let first = addrs else {
+            AppLog.throughput.error("getifaddrs failed for interface \(interfaceName, privacy: .public)")
+            return nil
+        }
         defer { freeifaddrs(addrs) }
 
         var pointer = first
@@ -27,7 +32,8 @@ final class ThroughputService {
                 return ThroughputSample(
                     timestamp: Date(),
                     inBytes: UInt64(networkData.ifi_ibytes),
-                    outBytes: UInt64(networkData.ifi_obytes)
+                    outBytes: UInt64(networkData.ifi_obytes),
+                    counterMaximum: UInt64(UInt32.max)
                 )
             }
             guard let next = iface.ifa_next else { break }
@@ -79,7 +85,8 @@ final class ThroughputService {
                 return ThroughputSample(
                     timestamp: Date(),
                     inBytes: UInt64(message.ifm_data.ifi_ibytes),
-                    outBytes: UInt64(message.ifm_data.ifi_obytes)
+                    outBytes: UInt64(message.ifm_data.ifi_obytes),
+                    counterMaximum: nil
                 )
             }) {
                 return sample

@@ -12,6 +12,10 @@ let package = Package(
                 .linkedFramework("ServiceManagement"),
                 .linkedFramework("CoreWLAN")
             ]
+        ),
+        .testTarget(
+            name: "PingBarTests",
+            dependencies: ["PingBar"]
         )
     ],
     swiftLanguageModes: [.v6]

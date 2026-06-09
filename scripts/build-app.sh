@@ -1,5 +1,5 @@
 #!/bin/bash
-set -e
+set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
@@ -8,6 +8,16 @@ APP_NAME="PingBar"
 APP_BUNDLE="$BUILD_DIR/$APP_NAME.app"
 MIN_OS_VERSION="$(/usr/libexec/PlistBuddy -c 'Print :LSMinimumSystemVersion' "$PROJECT_DIR/Resources/Info.plist")"
 SDK_VERSION="$(xcrun --sdk macosx --show-sdk-version)"
+
+validate_version() {
+    local name="$1"
+    local value="$2"
+
+    if [[ ! "$value" =~ ^[0-9]+(\.[0-9]+){1,2}$ ]]; then
+        echo "Invalid $name version: $value" >&2
+        exit 1
+    fi
+}
 
 normalize_build_version() {
     local executable="$1"
@@ -20,6 +30,8 @@ normalize_build_version() {
 }
 
 cd "$PROJECT_DIR"
+validate_version "minimum OS" "$MIN_OS_VERSION"
+validate_version "SDK" "$SDK_VERSION"
 
 echo "Building $APP_NAME..."
 swift build -c release

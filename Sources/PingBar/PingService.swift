@@ -38,12 +38,26 @@ final class PingService: Sendable {
             try process.run()
             process.waitUntilExit()
         } catch {
+            AppLog.ping.error("Failed to launch /sbin/ping for \(self.target, privacy: .public): \(error.localizedDescription, privacy: .public)")
             return nil
         }
 
         let data = pipe.fileHandleForReading.readDataToEndOfFile()
         guard let output = String(data: data, encoding: .utf8) else { return nil }
+        guard process.terminationStatus == 0 else {
+            AppLog.ping.error("System ping to \(self.target, privacy: .public) exited with status \(process.terminationStatus, privacy: .public): \(output, privacy: .public)")
+            return nil
+        }
 
+        guard let latency = Self.latency(from: output) else {
+            AppLog.ping.error("System ping to \(self.target, privacy: .public) did not include a latency sample: \(output, privacy: .public)")
+            return nil
+        }
+
+        return latency
+    }
+
+    static func latency(from output: String) -> Double? {
         guard let regex = Self.timeRegex,
               let match = regex.firstMatch(in: output, range: NSRange(output.startIndex..., in: output)),
               let range = Range(match.range(at: 1), in: output) else {
@@ -54,7 +68,10 @@ final class PingService: Sendable {
     }
 
     private func executeTCPConnect(port: UInt16) -> Double? {
-        guard let nwPort = NWEndpoint.Port(rawValue: port) else { return nil }
+        guard let nwPort = NWEndpoint.Port(rawValue: port) else {
+            AppLog.ping.error("Invalid TCP probe port \(port, privacy: .public) for \(self.target, privacy: .public)")
+            return nil
+        }
 
         let semaphore = DispatchSemaphore(value: 0)
         let start = Date()
@@ -65,7 +82,13 @@ final class PingService: Sendable {
             switch state {
             case .ready:
                 probe.finish(Date().timeIntervalSince(start) * 1000)
-            case .failed, .cancelled:
+            case .waiting(let error):
+                AppLog.ping.error("TCP probe to \(self.target, privacy: .public):\(port, privacy: .public) waiting: \(String(describing: error), privacy: .public)")
+                probe.finish(nil)
+            case .failed(let error):
+                AppLog.ping.error("TCP probe to \(self.target, privacy: .public):\(port, privacy: .public) failed: \(String(describing: error), privacy: .public)")
+                probe.finish(nil)
+            case .cancelled:
                 probe.finish(nil)
             default:
                 break
@@ -74,6 +97,7 @@ final class PingService: Sendable {
         connection.start(queue: .global(qos: .utility))
 
         if semaphore.wait(timeout: .now() + 2) == .timedOut {
+            AppLog.ping.error("TCP probe to \(self.target, privacy: .public):\(port, privacy: .public) timed out")
             probe.finish(nil)
         }
 

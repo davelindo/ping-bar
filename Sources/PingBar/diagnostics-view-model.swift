@@ -273,6 +273,15 @@ final class DiagnosticsViewModel: ObservableObject {
         }
     }
 
+    func colorForInternetProbe(_ ms: Double?) -> Color {
+        guard let ms = ms else { return .secondary }
+        switch ms {
+        case ..<100: return .green
+        case ..<300: return .orange
+        default: return .red
+        }
+    }
+
     func colorForJitter(_ ms: Double?) -> Color {
         guard let ms = ms else { return .red }
         switch ms {

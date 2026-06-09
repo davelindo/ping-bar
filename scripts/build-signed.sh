@@ -1,5 +1,5 @@
 #!/bin/bash
-set -e
+set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
@@ -14,6 +14,16 @@ DEVELOPER_ID="Developer ID Application: Johan Eliasson (J2Z78W23W7)"
 TEAM_ID="J2Z78W23W7"
 BUNDLE_ID="com.elitan.pingbar"
 
+validate_version() {
+    local name="$1"
+    local value="$2"
+
+    if [[ ! "$value" =~ ^[0-9]+(\.[0-9]+){1,2}$ ]]; then
+        echo "Invalid $name version: $value" >&2
+        exit 1
+    fi
+}
+
 normalize_build_version() {
     local executable="$1"
     local output="$executable.vtool"
@@ -25,6 +35,8 @@ normalize_build_version() {
 }
 
 cd "$PROJECT_DIR"
+validate_version "minimum OS" "$MIN_OS_VERSION"
+validate_version "SDK" "$SDK_VERSION"
 
 echo "Building $APP_NAME..."
 swift build -c release

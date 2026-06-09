@@ -52,6 +52,8 @@ final class DiagnosticsService: @unchecked Sendable {
 
     private var throughputBaseline: ThroughputSample?
     private var lastThroughputSample: ThroughputSample?
+    private var sessionDownloadedBytes: UInt64 = 0
+    private var sessionUploadedBytes: UInt64 = 0
 
     var onUpdate: (() -> Void)?
     private lazy var interfacePortMap: [String: String] = loadInterfacePortMap()
@@ -206,6 +208,8 @@ final class DiagnosticsService: @unchecked Sendable {
                     self.internetJitterHistory.add(self.internetHistory.jitter)
                     self.routerLossHistory.add(routerLatency == nil ? 100 : 0)
                     self.internetLossHistory.add(internetLatency == nil ? 100 : 0)
+                } else {
+                    self.recordDetailedSamplingGap()
                 }
                 self.applyWiFiIdentity(wifiIdentity)
                 self.updateThroughput(sample: throughputSample)
@@ -216,6 +220,7 @@ final class DiagnosticsService: @unchecked Sendable {
                 let runPendingDetailedTick = self.pendingDetailedTick
                 self.pendingDetailedTick = false
                 if runPendingDetailedTick {
+                    self.onUpdate?()
                     self.tick(forceDetailed: true)
                 } else {
                     self.onUpdate?()
@@ -315,8 +320,22 @@ final class DiagnosticsService: @unchecked Sendable {
         currentUploadRate = nil
         totalDownloaded = nil
         totalUploaded = nil
+        sessionDownloadedBytes = 0
+        sessionUploadedBytes = 0
         downloadRateHistory.clear()
         uploadRateHistory.clear()
+    }
+
+    private func recordDetailedSamplingGap() {
+        wifiSignalHistory.add(nil)
+        wifiNoiseHistory.add(nil)
+        wifiRateHistory.add(nil)
+        routerHistory.add(nil)
+        dnsHistory.add(nil)
+        routerJitterHistory.add(nil)
+        internetJitterHistory.add(nil)
+        routerLossHistory.add(nil)
+        internetLossHistory.add(nil)
     }
 
     private func applyWiFiIdentity(_ identity: WiFiIdentity?) {
@@ -365,41 +384,56 @@ final class DiagnosticsService: @unchecked Sendable {
             currentUploadRate = nil
             totalDownloaded = 0
             totalUploaded = 0
+            sessionDownloadedBytes = 0
+            sessionUploadedBytes = 0
             return
         }
 
         if let last = lastThroughputSample {
             let deltaTime = sample.timestamp.timeIntervalSince(last.timestamp)
             if deltaTime > 0 {
-                let deltaIn = Int64(sample.inBytes) - Int64(last.inBytes)
-                let deltaOut = Int64(sample.outBytes) - Int64(last.outBytes)
-                if deltaIn >= 0, deltaOut >= 0 {
+                let deltaIn = throughputDelta(current: sample.inBytes, previous: last.inBytes, counterMaximum: last.counterMaximum)
+                let deltaOut = throughputDelta(current: sample.outBytes, previous: last.outBytes, counterMaximum: last.counterMaximum)
+                if let deltaIn, let deltaOut {
                     currentDownloadRate = Double(deltaIn) / deltaTime
                     currentUploadRate = Double(deltaOut) / deltaTime
+                    sessionDownloadedBytes = sessionDownloadedBytes.saturatingAdd(deltaIn)
+                    sessionUploadedBytes = sessionUploadedBytes.saturatingAdd(deltaOut)
+                    totalDownloaded = Double(sessionDownloadedBytes)
+                    totalUploaded = Double(sessionUploadedBytes)
                     if isDataUsageHistoryEnabled {
                         dataUsageStore.record(
-                            downloaded: UInt64(deltaIn),
-                            uploaded: UInt64(deltaOut),
+                            downloaded: deltaIn,
+                            uploaded: deltaOut,
                             networkName: networkNameForAccounting(),
                             now: sample.timestamp
                         )
                     }
                 } else {
+                    AppLog.throughput.error("Interface counter reset detected on \(self.defaultRouteInterface ?? "unknown", privacy: .public); resetting throughput baseline")
                     resetThroughput()
+                    throughputBaseline = sample
+                    lastThroughputSample = sample
+                    totalDownloaded = 0
+                    totalUploaded = 0
+                    downloadRateHistory.add(nil)
+                    uploadRateHistory.add(nil)
+                    return
                 }
             }
-        }
-
-        if let baseline = throughputBaseline {
-            let totalIn = Int64(sample.inBytes) - Int64(baseline.inBytes)
-            let totalOut = Int64(sample.outBytes) - Int64(baseline.outBytes)
-            totalDownloaded = totalIn >= 0 ? Double(totalIn) : nil
-            totalUploaded = totalOut >= 0 ? Double(totalOut) : nil
         }
 
         lastThroughputSample = sample
         downloadRateHistory.add(currentDownloadRate)
         uploadRateHistory.add(currentUploadRate)
+    }
+
+    private func throughputDelta(current: UInt64, previous: UInt64, counterMaximum: UInt64?) -> UInt64? {
+        let delta = ThroughputCounter.delta(current: current, previous: previous, counterMaximum: counterMaximum)
+        if delta != nil, current < previous {
+            AppLog.throughput.error("Counter wrap detected on \(self.defaultRouteInterface ?? "unknown", privacy: .public); applying wrap correction")
+        }
+        return delta
     }
 
     private func loadInterfacePortMap() -> [String: String] {

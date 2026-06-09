@@ -36,7 +36,6 @@ struct DiagnosticsView: View {
                 }
                 .frame(width: 390, height: 560)
                 .background(popoverBackground)
-                .preferredColorScheme(.dark)
             } else {
                 Color.clear
                     .frame(width: 390, height: 560)
@@ -250,7 +249,7 @@ struct DiagnosticsView: View {
                 title: "Internet",
                 value: formatLatency(viewModel.internetLatency),
                 icon: "globe",
-                color: viewModel.colorForPing(viewModel.internetLatency)
+                color: viewModel.colorForInternetProbe(viewModel.internetLatency)
             )
             healthTile(
                 title: "Router",
@@ -352,9 +351,9 @@ struct DiagnosticsView: View {
     private var internetSection: some View {
         sectionPanel("Internet") {
             metricRow(
-                label: "Ping",
+                label: "TCP :443",
                 value: formatLatency(viewModel.internetLatency),
-                color: viewModel.colorForPing(viewModel.internetLatency),
+                color: viewModel.colorForInternetProbe(viewModel.internetLatency),
                 history: viewModel.internetHistory
             )
             ThroughputRowView(
@@ -816,14 +815,14 @@ struct DiagnosticsView: View {
         Group {
             let shape = RoundedRectangle(cornerRadius: 18, style: .continuous)
             ZStack {
-                shape.fill(Color(red: 0.12, green: 0.12, blue: 0.13))
-                shape.stroke(Color.white.opacity(0.08), lineWidth: 1)
+                shape.fill(Color(nsColor: .windowBackgroundColor))
+                shape.stroke(Color(nsColor: .separatorColor).opacity(0.65), lineWidth: 1)
             }
         }
     }
 
     private var panelFill: some ShapeStyle {
-        Color(red: 0.16, green: 0.16, blue: 0.17)
+        Color(nsColor: .controlBackgroundColor)
     }
 
     private var footerBar: some View {

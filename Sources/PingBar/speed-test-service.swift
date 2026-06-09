@@ -170,6 +170,11 @@ final class SpeedTestService: @unchecked Sendable {
                   let http = response as? HTTPURLResponse,
                   (200..<300).contains(http.statusCode),
                   let data = data else {
+                AppLog.speedTest.error("Download test failed: \(error?.localizedDescription ?? "invalid response", privacy: .public)")
+                return
+            }
+            guard data.count == bytes else {
+                AppLog.speedTest.error("Download test returned \(data.count, privacy: .public) bytes, expected \(bytes, privacy: .public)")
                 return
             }
             result.succeed(bytes: data.count)
@@ -203,6 +208,7 @@ final class SpeedTestService: @unchecked Sendable {
             guard error == nil,
                   let http = response as? HTTPURLResponse,
                   (200..<300).contains(http.statusCode) else {
+                AppLog.speedTest.error("Upload test failed: \(error?.localizedDescription ?? "invalid response", privacy: .public)")
                 return
             }
             result.succeed(bytes: bytes)
