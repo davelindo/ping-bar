@@ -323,31 +323,6 @@ struct DiagnosticsView: View {
         }
     }
 
-    private var routerSection: some View {
-        sectionPanel("Router", trailingText: viewModel.gatewayIP) {
-            metricRow(
-                label: "Ping",
-                value: formatLatency(viewModel.routerLatency),
-                color: viewModel.colorForPing(viewModel.routerLatency),
-                history: viewModel.routerHistory
-            )
-
-            metricRow(
-                label: "Jitter",
-                value: formatLatency(viewModel.routerJitter),
-                color: viewModel.colorForJitter(viewModel.routerJitter),
-                history: viewModel.routerJitterHistory
-            )
-
-            metricRow(
-                label: "Loss",
-                value: formatLoss(viewModel.routerLoss),
-                color: viewModel.colorForLoss(viewModel.routerLoss),
-                history: viewModel.routerLossHistory
-            )
-        }
-    }
-
     private var internetSection: some View {
         sectionPanel("Internet") {
             metricRow(
