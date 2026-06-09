@@ -475,7 +475,7 @@ struct DiagnosticsView: View {
     }
 
     private var severeLossDetected: Bool {
-        viewModel.routerLoss >= 10 || viewModel.internetLoss >= 10
+        viewModel.internetLoss >= 10
     }
 
     private func sectionPanel<Content: View>(
