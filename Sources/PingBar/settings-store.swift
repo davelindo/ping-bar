@@ -7,12 +7,16 @@ final class SettingsStore: ObservableObject {
         static let samplingIntervalOpen = "settings.samplingIntervalOpen"
         static let samplingIntervalClosed = "settings.samplingIntervalClosed"
         static let statusBarDisplayMode = "settings.statusBarDisplayMode"
+        static let isDataUsageHistoryEnabled = "settings.isDataUsageHistoryEnabled"
+        static let isPerNetworkUsageEnabled = "settings.isPerNetworkUsageEnabled"
+        static let dataUsageRetentionDays = "settings.dataUsageRetentionDays"
     }
 
     static let defaultInternetPingTarget = "1.1.1.1"
     static let defaultDnsLookupHost = "cloudflare.com"
     static let defaultSamplingIntervalOpen = 1.0
     static let defaultSamplingIntervalClosed = 10.0
+    static let defaultDataUsageRetentionDays = DataUsageStore.defaultRetentionDays
 
     private let defaults: UserDefaults
 
@@ -36,6 +40,18 @@ final class SettingsStore: ObservableObject {
         didSet { normalizeAndSaveSamplingIntervalClosed() }
     }
 
+    @Published var isDataUsageHistoryEnabled: Bool {
+        didSet { defaults.set(isDataUsageHistoryEnabled, forKey: Keys.isDataUsageHistoryEnabled) }
+    }
+
+    @Published var isPerNetworkUsageEnabled: Bool {
+        didSet { defaults.set(isPerNetworkUsageEnabled, forKey: Keys.isPerNetworkUsageEnabled) }
+    }
+
+    @Published var dataUsageRetentionDays: Int {
+        didSet { normalizeAndSaveDataUsageRetentionDays() }
+    }
+
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
 
@@ -43,6 +59,9 @@ final class SettingsStore: ObservableObject {
         dnsLookupHost = defaults.string(forKey: Keys.dnsLookupHost) ?? Self.defaultDnsLookupHost
         samplingIntervalOpen = defaults.object(forKey: Keys.samplingIntervalOpen) as? Double ?? Self.defaultSamplingIntervalOpen
         samplingIntervalClosed = defaults.object(forKey: Keys.samplingIntervalClosed) as? Double ?? Self.defaultSamplingIntervalClosed
+        isDataUsageHistoryEnabled = defaults.object(forKey: Keys.isDataUsageHistoryEnabled) as? Bool ?? true
+        isPerNetworkUsageEnabled = defaults.object(forKey: Keys.isPerNetworkUsageEnabled) as? Bool ?? true
+        dataUsageRetentionDays = defaults.object(forKey: Keys.dataUsageRetentionDays) as? Int ?? Self.defaultDataUsageRetentionDays
         if let rawValue = defaults.string(forKey: Keys.statusBarDisplayMode),
            let mode = StatusBarDisplayMode(rawValue: rawValue) {
             statusBarDisplayMode = mode
@@ -54,6 +73,7 @@ final class SettingsStore: ObservableObject {
         normalizeAndSaveDnsHost()
         normalizeAndSaveSamplingIntervalOpen()
         normalizeAndSaveSamplingIntervalClosed()
+        normalizeAndSaveDataUsageRetentionDays()
     }
 
     private func normalizeAndSaveInternetTarget() {
@@ -75,7 +95,11 @@ final class SettingsStore: ObservableObject {
     }
 
     private func normalizeAndSaveSamplingIntervalOpen() {
-        let normalized = normalizedInterval(samplingIntervalOpen, defaultValue: Self.defaultSamplingIntervalOpen)
+        let normalized = normalizedInterval(
+            samplingIntervalOpen,
+            defaultValue: Self.defaultSamplingIntervalOpen,
+            minimum: 1.0
+        )
         if samplingIntervalOpen != normalized {
             samplingIntervalOpen = normalized
             return
@@ -84,7 +108,11 @@ final class SettingsStore: ObservableObject {
     }
 
     private func normalizeAndSaveSamplingIntervalClosed() {
-        let normalized = normalizedInterval(samplingIntervalClosed, defaultValue: Self.defaultSamplingIntervalClosed)
+        let normalized = normalizedInterval(
+            samplingIntervalClosed,
+            defaultValue: Self.defaultSamplingIntervalClosed,
+            minimum: 5.0
+        )
         if samplingIntervalClosed != normalized {
             samplingIntervalClosed = normalized
             return
@@ -97,9 +125,21 @@ final class SettingsStore: ObservableObject {
         return trimmed.isEmpty ? defaultValue : trimmed
     }
 
-    private func normalizedInterval(_ value: Double, defaultValue: Double) -> Double {
-        let clamped = max(0.5, value)
+    private func normalizedInterval(_ value: Double, defaultValue: Double, minimum: Double) -> Double {
+        let clamped = max(minimum, value)
         return clamped.isNaN ? defaultValue : clamped
+    }
+
+    private func normalizeAndSaveDataUsageRetentionDays() {
+        let allowedValues = [7, 30, 90, 365]
+        let normalized = allowedValues.min(by: {
+            abs($0 - dataUsageRetentionDays) < abs($1 - dataUsageRetentionDays)
+        }) ?? Self.defaultDataUsageRetentionDays
+        if dataUsageRetentionDays != normalized {
+            dataUsageRetentionDays = normalized
+            return
+        }
+        defaults.set(normalized, forKey: Keys.dataUsageRetentionDays)
     }
 }
 

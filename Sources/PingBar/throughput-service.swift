@@ -1,5 +1,5 @@
 import Foundation
-import SystemConfiguration
+import Darwin
 
 struct ThroughputSample {
     let timestamp: Date
@@ -10,6 +10,9 @@ struct ThroughputSample {
 final class ThroughputService {
     func sample(interfaceName: String?) -> ThroughputSample? {
         guard let interfaceName, !interfaceName.isEmpty else { return nil }
+        if let sample = sample64(interfaceName: interfaceName) {
+            return sample
+        }
 
         var addrs: UnsafeMutablePointer<ifaddrs>?
         guard getifaddrs(&addrs) == 0, let first = addrs else { return nil }
@@ -29,6 +32,60 @@ final class ThroughputService {
             }
             guard let next = iface.ifa_next else { break }
             pointer = next
+        }
+
+        return nil
+    }
+
+    private func sample64(interfaceName: String) -> ThroughputSample? {
+        let interfaceIndex = if_nametoindex(interfaceName)
+        guard interfaceIndex > 0 else { return nil }
+
+        var mib: [Int32] = [
+            CTL_NET,
+            PF_ROUTE,
+            0,
+            0,
+            NET_RT_IFLIST2,
+            Int32(interfaceIndex)
+        ]
+        var length = 0
+        guard sysctl(&mib, u_int(mib.count), nil, &length, nil, 0) == 0, length > 0 else {
+            return nil
+        }
+
+        var buffer = [UInt8](repeating: 0, count: length)
+        guard sysctl(&mib, u_int(mib.count), &buffer, &length, nil, 0) == 0 else {
+            return nil
+        }
+
+        var offset = 0
+        while offset + MemoryLayout<if_msghdr2>.size <= length {
+            let messageLength = buffer.withUnsafeBytes { bytes in
+                bytes.baseAddress!
+                    .advanced(by: offset)
+                    .assumingMemoryBound(to: if_msghdr2.self)
+                    .pointee
+                    .ifm_msglen
+            }
+            guard messageLength > 0 else { break }
+
+            if let sample = buffer.withUnsafeBytes({ bytes -> ThroughputSample? in
+                let message = bytes.baseAddress!
+                    .advanced(by: offset)
+                    .assumingMemoryBound(to: if_msghdr2.self)
+                    .pointee
+                guard message.ifm_type == UInt8(RTM_IFINFO2) else { return nil }
+                return ThroughputSample(
+                    timestamp: Date(),
+                    inBytes: UInt64(message.ifm_data.ifi_ibytes),
+                    outBytes: UInt64(message.ifm_data.ifi_obytes)
+                )
+            }) {
+                return sample
+            }
+
+            offset += Int(messageLength)
         }
 
         return nil

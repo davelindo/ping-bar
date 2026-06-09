@@ -18,19 +18,19 @@ struct ThroughputGraphView: View {
                     fill
                         .fill(
                             LinearGradient(
-                                colors: [Color.secondary.opacity(0.12), Color.secondary.opacity(0.02)],
+                                colors: [Color.blue.opacity(0.12), Color.blue.opacity(0.02)],
                                 startPoint: .top,
                                 endPoint: .bottom
                             )
                         )
 
                     linePath(points: downloadPoints)
-                        .stroke(Color.secondary.opacity(0.65), style: StrokeStyle(lineWidth: 1.4, lineCap: .round, lineJoin: .round))
+                        .stroke(Color.blue.opacity(0.88), style: StrokeStyle(lineWidth: 1.3, lineCap: .round, lineJoin: .round))
                 }
 
                 if uploadPoints.count > 1 {
                     linePath(points: uploadPoints)
-                        .stroke(Color.secondary.opacity(0.45), style: StrokeStyle(lineWidth: 1.2, lineCap: .round, lineJoin: .round))
+                        .stroke(Color.purple.opacity(0.78), style: StrokeStyle(lineWidth: 1.2, lineCap: .round, lineJoin: .round))
                 }
             } else {
                 Color.clear

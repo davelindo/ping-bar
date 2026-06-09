@@ -66,7 +66,7 @@ class StatusBarController: NSObject, NSPopoverDelegate {
 
         popover = NSPopover()
         popover.behavior = .transient
-        popover.contentSize = NSSize(width: 360, height: 520)
+        popover.contentSize = NSSize(width: 390, height: 560)
         popover.contentViewController = NSHostingController(rootView: diagnosticsView)
         popover.delegate = self
     }
@@ -75,6 +75,9 @@ class StatusBarController: NSObject, NSPopoverDelegate {
         diagnosticsService.updateInternetTarget(settings.internetPingTarget)
         diagnosticsService.updateDnsHostname(settings.dnsLookupHost)
         diagnosticsService.setSamplingInterval(settings.samplingIntervalClosed, tickImmediately: false)
+        diagnosticsService.setDataUsageHistoryEnabled(settings.isDataUsageHistoryEnabled)
+        diagnosticsService.setPerNetworkUsageEnabled(settings.isPerNetworkUsageEnabled)
+        diagnosticsService.setDataUsageRetentionDays(settings.dataUsageRetentionDays)
 
         settings.$internetPingTarget
             .removeDuplicates()
@@ -114,6 +117,18 @@ class StatusBarController: NSObject, NSPopoverDelegate {
             }
             .store(in: &cancellables)
 
+        bindDataUsageSetting(settings.$isDataUsageHistoryEnabled) { service, enabled in
+            service.setDataUsageHistoryEnabled(enabled)
+        }
+
+        bindDataUsageSetting(settings.$isPerNetworkUsageEnabled) { service, enabled in
+            service.setPerNetworkUsageEnabled(enabled)
+        }
+
+        bindDataUsageSetting(settings.$dataUsageRetentionDays) { service, days in
+            service.setDataUsageRetentionDays(days)
+        }
+
         diagnosticsService.onUpdate = { [weak self] in
             guard let self = self else { return }
             let latency = self.diagnosticsService.isRunning ? self.diagnosticsService.internetHistory.latest : nil
@@ -125,47 +140,51 @@ class StatusBarController: NSObject, NSPopoverDelegate {
         diagnosticsService.start()
     }
 
+    private func bindDataUsageSetting<Value: Equatable>(
+        _ publisher: Published<Value>.Publisher,
+        apply: @escaping (DiagnosticsService, Value) -> Void
+    ) {
+        publisher
+            .removeDuplicates()
+            .sink { [weak self] value in
+                guard let self else { return }
+                apply(self.diagnosticsService, value)
+                self.viewModel.refresh()
+            }
+            .store(in: &cancellables)
+    }
+
     private func updateDisplay(latency: Double?) {
         guard let displayView else { return }
 
-        let throughputRates: (down: Double, up: Double)? = {
-            guard settings.statusBarDisplayMode == .throughput, diagnosticsService.isRunning else { return nil }
-            return statusBarThroughputRates()
-        }()
-
-        let (text, color): (String, NSColor) = {
-            guard diagnosticsService.isRunning else {
-                return ("---", .secondaryLabelColor)
-            }
-            switch settings.statusBarDisplayMode {
-            case .latency:
-                guard let ms = latency else {
-                    return ("---", .secondaryLabelColor)
-                }
-                if ms >= 1000 {
-                    return (String(format: "%.1fs", ms / 1000), colorForLatency(ms))
-                }
-                return ("\(Int(ms.rounded()))ms", colorForLatency(ms))
-            case .throughput:
-                guard let rates = throughputRates else {
-                    return ("---", .secondaryLabelColor)
-                }
-                let downText = compactRateString(rates.down)
-                let upText = compactRateString(rates.up)
-                return ("↓\(downText) ↑\(upText)", .labelColor)
-            }
-        }()
-
         switch settings.statusBarDisplayMode {
         case .latency:
-            displayView.updateLatency(text: text, color: color)
+            displayView.updateLatency(text: latencyDisplayText(latency), color: latencyDisplayColor(latency))
         case .throughput:
+            let throughputRates = diagnosticsService.isRunning ? statusBarThroughputRates() : nil
             let downText = throughputRates.map { compactRateString($0.down) } ?? "--"
             let upText = throughputRates.map { compactRateString($0.up) } ?? "--"
             displayView.updateThroughput(down: "↓\(downText)", up: "↑\(upText)")
         }
 
         statusItem.length = max(1, displayView.intrinsicContentSize.width)
+    }
+
+    private func latencyDisplayText(_ latency: Double?) -> String {
+        guard diagnosticsService.isRunning, let ms = latency else {
+            return "---"
+        }
+        if ms >= 1000 {
+            return String(format: "%.1fs", ms / 1000)
+        }
+        return "\(Int(ms.rounded()))ms"
+    }
+
+    private func latencyDisplayColor(_ latency: Double?) -> NSColor {
+        guard diagnosticsService.isRunning, let latency else {
+            return .secondaryLabelColor
+        }
+        return colorForLatency(latency)
     }
 
     private func resetStatusBarThroughputSample() {
@@ -256,6 +275,10 @@ class StatusBarController: NSObject, NSPopoverDelegate {
         NSApp.terminate(nil)
     }
 
+    func shutdown() {
+        diagnosticsService.shutdown()
+    }
+
     func popoverDidClose(_ notification: Notification) {
         setPopoverVisible(false)
     }
@@ -264,6 +287,7 @@ class StatusBarController: NSObject, NSPopoverDelegate {
         guard isPopoverVisible != visible else { return }
         isPopoverVisible = visible
         viewModel.isPopoverVisible = visible
+        diagnosticsService.setDetailedSamplingEnabled(visible)
         let interval = visible ? settings.samplingIntervalOpen : settings.samplingIntervalClosed
         diagnosticsService.setSamplingInterval(interval, tickImmediately: visible)
         if visible {

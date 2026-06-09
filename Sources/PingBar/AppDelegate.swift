@@ -8,4 +8,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         NSApp.setActivationPolicy(.accessory)
         statusBarController = StatusBarController()
     }
+
+    @MainActor
+    func applicationWillTerminate(_ notification: Notification) {
+        statusBarController?.shutdown()
+    }
 }
