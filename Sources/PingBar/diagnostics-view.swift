@@ -326,7 +326,7 @@ struct DiagnosticsView: View {
     private var internetSection: some View {
         sectionPanel("Internet") {
             metricRow(
-                label: "TCP :443",
+                label: "Latency",
                 value: formatLatency(viewModel.internetLatency),
                 color: viewModel.colorForInternetProbe(viewModel.internetLatency),
                 history: viewModel.internetHistory
@@ -850,11 +850,11 @@ struct DiagnosticsView: View {
         }
         .padding(.horizontal, 22)
         .padding(.vertical, 10)
-        .background(Color(red: 0.12, green: 0.12, blue: 0.15))
+        .background(Color(nsColor: .controlBackgroundColor))
         .overlay(
             Rectangle()
                 .frame(height: 1)
-                .foregroundColor(Color.white.opacity(0.08)),
+                .foregroundColor(Color(nsColor: .separatorColor).opacity(0.65)),
             alignment: .top
         )
     }
