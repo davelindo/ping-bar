@@ -4,12 +4,6 @@ import SwiftUI
 
 @MainActor
 class StatusBarController: NSObject, NSPopoverDelegate {
-    private struct ThroughputSnapshot {
-        let timestamp: Date
-        let down: Double
-        let up: Double
-    }
-
     private var statusItem: NSStatusItem
     private let diagnosticsService = DiagnosticsService()
     private var popover: NSPopover!
@@ -20,9 +14,6 @@ class StatusBarController: NSObject, NSPopoverDelegate {
     private var displayView: StatusItemDisplayView?
     private var localMonitor: Any?
     private var globalMonitor: Any?
-    private let statusBarThroughputInterval: TimeInterval = 4.0
-    private var statusBarThroughputSample: ThroughputSnapshot?
-    private var statusBarThroughputRate: (down: Double, up: Double)?
 
     override init() {
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
@@ -66,8 +57,10 @@ class StatusBarController: NSObject, NSPopoverDelegate {
 
         popover = NSPopover()
         popover.behavior = .transient
-        popover.contentSize = NSSize(width: 390, height: 560)
-        popover.contentViewController = NSHostingController(rootView: diagnosticsView)
+        popover.contentSize = NSSize(width: 390, height: 640)
+        let hostingController = NSHostingController(rootView: diagnosticsView)
+        hostingController.view.appearance = NSAppearance(named: .darkAqua)
+        popover.contentViewController = hostingController
         popover.delegate = self
     }
 
@@ -112,7 +105,6 @@ class StatusBarController: NSObject, NSPopoverDelegate {
         settings.$statusBarDisplayMode
             .removeDuplicates()
             .sink { [weak self] _ in
-                self?.resetStatusBarThroughputSample()
                 self?.updateDisplay(latency: self?.diagnosticsService.internetHistory.latest)
             }
             .store(in: &cancellables)
@@ -133,7 +125,7 @@ class StatusBarController: NSObject, NSPopoverDelegate {
             guard let self = self else { return }
             let latency = self.diagnosticsService.isRunning ? self.diagnosticsService.internetHistory.latest : nil
             self.updateDisplay(latency: latency)
-            if self.isPopoverVisible {
+            if self.isPopoverVisible, self.viewModel.isPopoverVisible {
                 self.viewModel.refresh()
             }
         }
@@ -187,42 +179,18 @@ class StatusBarController: NSObject, NSPopoverDelegate {
         return colorForLatency(latency)
     }
 
-    private func resetStatusBarThroughputSample() {
-        statusBarThroughputSample = nil
-        statusBarThroughputRate = nil
-    }
-
-    private func statusBarThroughputRates(now: Date = Date()) -> (down: Double, up: Double)? {
-        guard let totalDown = diagnosticsService.totalDownloaded,
-              let totalUp = diagnosticsService.totalUploaded else {
-            resetStatusBarThroughputSample()
-            return nil
+    private func statusBarThroughputRates() -> (down: Double, up: Double)? {
+        if let down = diagnosticsService.currentDownloadRate,
+           let up = diagnosticsService.currentUploadRate {
+            return (down: down, up: up)
         }
 
-        guard let sample = statusBarThroughputSample else {
-            statusBarThroughputSample = ThroughputSnapshot(timestamp: now, down: totalDown, up: totalUp)
-            return nil
+        if diagnosticsService.totalDownloaded != nil,
+           diagnosticsService.totalUploaded != nil {
+            return (down: 0, up: 0)
         }
 
-        if totalDown < sample.down || totalUp < sample.up {
-            statusBarThroughputSample = ThroughputSnapshot(timestamp: now, down: totalDown, up: totalUp)
-            statusBarThroughputRate = nil
-            return nil
-        }
-
-        let elapsed = now.timeIntervalSince(sample.timestamp)
-        guard elapsed > 0 else {
-            return statusBarThroughputRate
-        }
-        guard elapsed >= statusBarThroughputInterval else {
-            return statusBarThroughputRate
-        }
-
-        let downRate = (totalDown - sample.down) / elapsed
-        let upRate = (totalUp - sample.up) / elapsed
-        statusBarThroughputRate = (down: downRate, up: upRate)
-        statusBarThroughputSample = ThroughputSnapshot(timestamp: now, down: totalDown, up: totalUp)
-        return statusBarThroughputRate
+        return nil
     }
 
     private func colorForLatency(_ ms: Double) -> NSColor {
@@ -231,6 +199,9 @@ class StatusBarController: NSObject, NSPopoverDelegate {
 
     private func compactRateString(_ bytesPerSecond: Double) -> String {
         let bitsPerSecond = max(0, bytesPerSecond) * 8
+        if bitsPerSecond == 0 {
+            return "0b"
+        }
         let value: Double
         let suffix: String
 
@@ -275,8 +246,8 @@ class StatusBarController: NSObject, NSPopoverDelegate {
         NSApp.terminate(nil)
     }
 
-    func shutdown() {
-        diagnosticsService.shutdown()
+    func flushDataUsage() {
+        diagnosticsService.flushDataUsage()
     }
 
     func popoverDidClose(_ notification: Notification) {

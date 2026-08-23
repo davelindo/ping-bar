@@ -1,5 +1,6 @@
 import Foundation
 import Network
+import Darwin
 
 final class PingService: Sendable {
     enum Backend: Sendable {
@@ -10,6 +11,7 @@ final class PingService: Sendable {
     private let target: String
     private let backend: Backend
     private static let timeRegex = try? NSRegularExpression(pattern: "time=(\\d+\\.?\\d*)")
+    private static let systemPingTimeout: TimeInterval = 1.0
 
     init(target: String = "google.com", backend: Backend = .systemPing) {
         self.target = target
@@ -26,31 +28,57 @@ final class PingService: Sendable {
     }
 
     private func executeSystemPing() -> Double? {
+        return executeExternalPing()
+    }
+
+    private func executeExternalPing() -> Double? {
         let process = Process()
         let pipe = Pipe()
 
         process.executableURL = URL(fileURLWithPath: "/sbin/ping")
-        process.arguments = ["-c", "1", "-t", "2", target]
+        process.arguments = [
+            "-c", "1",
+            "-W", String(Int(Self.systemPingTimeout * 1000)),
+            "-t", String(Int(Self.systemPingTimeout)),
+            target
+        ]
         process.standardOutput = pipe
         process.standardError = pipe
 
         do {
             try process.run()
-            process.waitUntilExit()
         } catch {
             AppLog.ping.error("Failed to launch /sbin/ping for \(self.target, privacy: .public): \(error.localizedDescription, privacy: .public)")
             return nil
         }
 
-        let data = pipe.fileHandleForReading.readDataToEndOfFile()
-        guard let output = String(data: data, encoding: .utf8) else { return nil }
-        guard process.terminationStatus == 0 else {
-            AppLog.ping.error("System ping to \(self.target, privacy: .public) exited with status \(process.terminationStatus, privacy: .public): \(output, privacy: .public)")
+        let semaphore = DispatchSemaphore(value: 0)
+        let outputBox = PingOutputBox()
+        DispatchQueue.global(qos: .background).async {
+            let data = pipe.fileHandleForReading.readDataToEndOfFile()
+            process.waitUntilExit()
+            outputBox.data = data
+            semaphore.signal()
+        }
+
+        guard semaphore.wait(timeout: .now() + Self.systemPingTimeout) == .success else {
+            process.terminate()
+            if semaphore.wait(timeout: .now() + 0.2) == .timedOut {
+                process.interrupt()
+                _ = semaphore.wait(timeout: .now() + 0.2)
+            }
+            AppLog.ping.error("System ping fallback to \(self.target, privacy: .public) timed out")
             return nil
         }
 
-        guard let latency = Self.latency(from: output) else {
-            AppLog.ping.error("System ping to \(self.target, privacy: .public) did not include a latency sample: \(output, privacy: .public)")
+        guard process.terminationStatus == 0 else {
+            AppLog.ping.error("System ping fallback to \(self.target, privacy: .public) exited with status \(process.terminationStatus, privacy: .public)")
+            return nil
+        }
+
+        guard let output = String(data: outputBox.data, encoding: .utf8),
+              let latency = Self.latency(from: output) else {
+            AppLog.ping.error("System ping fallback to \(self.target, privacy: .public) returned no latency sample")
             return nil
         }
 
@@ -103,6 +131,10 @@ final class PingService: Sendable {
 
         return probe.elapsed()
     }
+}
+
+private final class PingOutputBox: @unchecked Sendable {
+    var data = Data()
 }
 
 private final class TCPConnectProbe: @unchecked Sendable {

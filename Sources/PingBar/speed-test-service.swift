@@ -56,35 +56,79 @@ enum SpeedTestError: Error, CustomStringConvertible, Sendable {
 }
 
 final class SpeedTestService: @unchecked Sendable {
-    private var downloadTask: URLSessionDataTask?
-    private var uploadTask: URLSessionDataTask?
-    private var isCancelled = false
+    private struct RunState {
+        var activeRunID: UUID?
+        var isCancelled = false
+        var isFinishing = false
+        var downloadTask: URLSessionDataTask?
+        var uploadTask: URLSessionDataTask?
+        var pingStopSemaphore: DispatchSemaphore?
+    }
+
+    private let stateLock = NSLock()
+    private var runState = RunState()
     private let session = URLSession(configuration: .ephemeral)
+    private let latencyOperation: @Sendable (String?, Int) -> Double?
+    private static let transferTimeout: TimeInterval = 20.0
+
+    init(latencyOperation: @escaping @Sendable (String?, Int) -> Double? = { host, samples in
+        SpeedTestService.measureLatency(host: host, samples: samples)
+    }) {
+        self.latencyOperation = latencyOperation
+    }
 
     func run(
         routerHost: String?,
         phase: @escaping @MainActor @Sendable (SpeedTestPhase) -> Void,
         completion: @escaping @MainActor @Sendable (Result<SpeedTestResult, SpeedTestError>) -> Void
     ) {
-        guard downloadTask == nil, uploadTask == nil else { return }
-        isCancelled = false
+        stateLock.lock()
+        guard runState.activeRunID == nil else {
+            stateLock.unlock()
+            return
+        }
+
+        let runID = UUID()
+        runState.activeRunID = runID
+        runState.isCancelled = false
+        runState.isFinishing = false
+        runState.downloadTask = nil
+        runState.uploadTask = nil
+        runState.pingStopSemaphore = nil
+        stateLock.unlock()
 
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
             guard let self else { return }
+            guard self.isCurrentRun(runID) else {
+                self.finishAndDeliver(runID, .failure(.cancelled), completion)
+                return
+            }
+
             Task { @MainActor in phase(.preparing) }
-            let idleLatency = self.measureLatency(host: routerHost, samples: 3)
+            let idleLatency = self.latencyOperation(routerHost, 3)
+
+            if self.isRunCancelled() {
+                self.finishAndDeliver(runID, .failure(.cancelled), completion)
+                return
+            }
 
             Task { @MainActor in phase(.downloading) }
             guard let downloadMbps = self.performDownload(bytes: 20_000_000) else {
-                self.finishIfCancelled(completion: completion)
-                Task { @MainActor in
-                    completion(.failure(.failed("Download test failed")))
+                if self.isRunCancelled() {
+                    self.finishAndDeliver(runID, .failure(.cancelled), completion)
+                } else {
+                    self.finishAndDeliver(runID, .failure(.failed("Download test failed")), completion)
                 }
                 return
             }
 
-            if self.isCancelled {
-                self.finishIfCancelled(completion: completion)
+            if self.isRunCancelled() {
+                self.finishAndDeliver(runID, .failure(.cancelled), completion)
+                return
+            }
+
+            guard self.isCurrentRun(runID) else {
+                self.finishAndDeliver(runID, .failure(.cancelled), completion)
                 return
             }
 
@@ -92,31 +136,34 @@ final class SpeedTestService: @unchecked Sendable {
             let loadedSamples = LockedDoubleSamples()
             let pingService = routerHost.map { PingService(target: $0) }
             let stopSemaphore = DispatchSemaphore(value: 0)
+            self.stateLock.lock()
+            self.runState.pingStopSemaphore = stopSemaphore
+            self.stateLock.unlock()
             let pingWorker = DispatchQueue.global(qos: .background)
             pingWorker.async {
-                while !self.isCancelled {
+                while !self.isRunCancelled() {
                     if stopSemaphore.wait(timeout: .now()) == .success {
                         break
                     }
                     if let ping = pingService?.executePing() {
                         loadedSamples.append(ping)
                     }
-                    Thread.sleep(forTimeInterval: 0.8)
+                    if self.waitForPingIntervalOrCancellation(on: stopSemaphore) {
+                        break
+                    }
                 }
             }
 
             let uploadMbps = self.performUpload(bytes: 5_000_000)
             stopSemaphore.signal()
 
-            if self.isCancelled {
-                self.finishIfCancelled(completion: completion)
+            if self.isRunCancelled() {
+                self.finishAndDeliver(runID, .failure(.cancelled), completion)
                 return
             }
 
             guard let uploadMbps else {
-                Task { @MainActor in
-                    completion(.failure(.failed("Upload test failed")))
-                }
+                self.finishAndDeliver(runID, .failure(.failed("Upload test failed")), completion)
                 return
             }
 
@@ -136,57 +183,106 @@ final class SpeedTestService: @unchecked Sendable {
                 lagRating: lagRating
             )
 
-            Task { @MainActor in
-                completion(.success(result))
-            }
+            self.finishAndDeliver(runID, .success(result), completion)
         }
+    }
+
+    private func isCurrentRun(_ identifier: UUID) -> Bool {
+        stateLock.lock()
+        defer { stateLock.unlock() }
+        return runState.activeRunID == identifier && !runState.isCancelled
     }
 
     func cancel() {
-        isCancelled = true
-        downloadTask?.cancel()
-        uploadTask?.cancel()
-        downloadTask = nil
-        uploadTask = nil
+        stateLock.lock()
+        runState.isCancelled = true
+        let semaphore = runState.pingStopSemaphore
+        runState.downloadTask?.cancel()
+        runState.uploadTask?.cancel()
+        runState.downloadTask = nil
+        runState.uploadTask = nil
+        stateLock.unlock()
+        semaphore?.signal()
     }
 
-    private func finishIfCancelled(completion: @escaping @MainActor @Sendable (Result<SpeedTestResult, SpeedTestError>) -> Void) {
-        if isCancelled {
-            Task { @MainActor in
-                completion(.failure(.cancelled))
-            }
+    private func finishAndDeliver(
+        _ identifier: UUID,
+        _ outcome: Result<SpeedTestResult, SpeedTestError>,
+        _ completion: @escaping @MainActor @Sendable (Result<SpeedTestResult, SpeedTestError>) -> Void
+    ) {
+        stateLock.lock()
+        let shouldDeliver = runState.activeRunID == identifier && !runState.isFinishing
+        if shouldDeliver {
+            runState.isFinishing = true
+            runState.activeRunID = nil
+            runState.isCancelled = false
+            runState.downloadTask = nil
+            runState.uploadTask = nil
+            runState.pingStopSemaphore = nil
         }
+        stateLock.unlock()
+
+        guard shouldDeliver else { return }
+        Task { @MainActor in completion(outcome) }
+    }
+
+    private func isRunCancelled() -> Bool {
+        stateLock.lock()
+        defer { stateLock.unlock() }
+        return runState.isCancelled
+    }
+
+    private func waitForPingIntervalOrCancellation(on semaphore: DispatchSemaphore) -> Bool {
+        let result = semaphore.wait(timeout: .now() + 0.8)
+        return result == .success
     }
 
     private func performDownload(bytes: Int) -> Double? {
         guard let url = URL(string: "https://speed.cloudflare.com/__down?bytes=\(bytes)") else { return nil }
+        var request = URLRequest(url: url)
+        request.timeoutInterval = Self.transferTimeout
         let start = CFAbsoluteTimeGetCurrent()
         let semaphore = DispatchSemaphore(value: 0)
         let result = URLTransferResult()
+        let task = session.dataTask(with: request) { data, response, error in
 
-        downloadTask = session.dataTask(with: url) { data, response, error in
             defer { semaphore.signal() }
             guard error == nil,
                   let http = response as? HTTPURLResponse,
                   (200..<300).contains(http.statusCode),
-                  let data = data else {
+                  let responseData = data else {
                 AppLog.speedTest.error("Download test failed: \(error?.localizedDescription ?? "invalid response", privacy: .public)")
                 return
             }
-            guard data.count == bytes else {
-                AppLog.speedTest.error("Download test returned \(data.count, privacy: .public) bytes, expected \(bytes, privacy: .public)")
+            guard result.snapshot().bytes + responseData.count <= bytes else {
+                AppLog.speedTest.error("Download test returned more than \(bytes, privacy: .public) bytes")
                 return
             }
-            result.succeed(bytes: data.count)
+            result.record(result.snapshot().bytes + responseData.count)
         }
-        downloadTask?.resume()
-        semaphore.wait()
-        downloadTask = nil
+        stateLock.lock()
+        runState.downloadTask = task
+        stateLock.unlock()
+        task.resume()
+        _ = semaphore.wait(timeout: .now() + Self.transferTimeout + 2.0)
+        if isRunCancelled() || result.snapshot().success == false {
+            task.cancel()
+        }
+        stateLock.lock()
+        if runState.downloadTask === task {
+            runState.downloadTask = nil
+        }
+        stateLock.unlock()
 
         let outcome = result.snapshot()
         let success = outcome.success
         let downloadedBytes = outcome.bytes
-        guard success else { return nil }
+        guard success, downloadedBytes == bytes else {
+            if success, downloadedBytes != bytes {
+                AppLog.speedTest.error("Download test returned \(downloadedBytes, privacy: .public) bytes, expected \(bytes, privacy: .public)")
+            }
+            return nil
+        }
         let elapsed = CFAbsoluteTimeGetCurrent() - start
         guard elapsed > 0 else { return nil }
         return (Double(downloadedBytes) * 8) / elapsed / 1_000_000
@@ -195,15 +291,35 @@ final class SpeedTestService: @unchecked Sendable {
     private func performUpload(bytes: Int) -> Double? {
         guard let url = URL(string: "https://speed.cloudflare.com/__up") else { return nil }
         var request = URLRequest(url: url)
+        request.timeoutInterval = Self.transferTimeout
         request.httpMethod = "POST"
         request.setValue("application/octet-stream", forHTTPHeaderField: "Content-Type")
+        let bodyURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("pingbar-upload-\(UUID().uuidString).bin")
+        guard FileManager.default.createFile(atPath: bodyURL.path, contents: nil) else {
+            AppLog.speedTest.error("Could not create temporary upload file")
+            return nil
+        }
 
-        let payload = Data(count: bytes)
+        guard let bodyHandle = try? FileHandle(forWritingTo: bodyURL) else {
+            AppLog.speedTest.error("Could not open temporary upload file")
+            return nil
+        }
+        do {
+            try bodyHandle.truncate(atOffset: UInt64(bytes))
+            try bodyHandle.close()
+        } catch {
+            try? bodyHandle.close()
+            try? FileManager.default.removeItem(at: bodyURL)
+            AppLog.speedTest.error("Could not size temporary upload file: \(error.localizedDescription, privacy: .public)")
+            return nil
+        }
+
         let start = CFAbsoluteTimeGetCurrent()
         let semaphore = DispatchSemaphore(value: 0)
         let result = URLTransferResult()
 
-        uploadTask = session.uploadTask(with: request, from: payload) { _, response, error in
+        let task = session.uploadTask(with: request, fromFile: bodyURL) { _, response, error in
             defer { semaphore.signal() }
             guard error == nil,
                   let http = response as? HTTPURLResponse,
@@ -213,9 +329,25 @@ final class SpeedTestService: @unchecked Sendable {
             }
             result.succeed(bytes: bytes)
         }
-        uploadTask?.resume()
-        semaphore.wait()
-        uploadTask = nil
+        stateLock.lock()
+        runState.uploadTask = task
+        stateLock.unlock()
+        task.resume()
+        let waitResult = semaphore.wait(timeout: .now() + Self.transferTimeout + 2.0)
+        if waitResult == .timedOut {
+            task.cancel()
+        }
+        stateLock.lock()
+        if runState.uploadTask === task {
+            runState.uploadTask = nil
+        }
+        stateLock.unlock()
+        try? FileManager.default.removeItem(at: bodyURL)
+
+        guard waitResult == .success else {
+            AppLog.speedTest.error("Upload test callback timed out")
+            return nil
+        }
 
         let success = result.snapshot().success
         guard success else { return nil }
@@ -224,7 +356,7 @@ final class SpeedTestService: @unchecked Sendable {
         return (Double(bytes) * 8) / elapsed / 1_000_000
     }
 
-    private func measureLatency(host: String?, samples: Int) -> Double? {
+    private static func measureLatency(host: String?, samples: Int) -> Double? {
         guard let host, samples > 0 else { return nil }
         let pingService = PingService(target: host)
         var values: [Double] = []
@@ -283,6 +415,13 @@ private final class URLTransferResult: @unchecked Sendable {
     private let lock = NSLock()
     private var bytes = 0
     private var success = false
+
+    func record(_ byteCount: Int) {
+        lock.lock()
+        defer { lock.unlock() }
+        bytes = byteCount
+        success = true
+    }
 
     func succeed(bytes: Int) {
         lock.lock()

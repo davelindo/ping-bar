@@ -83,6 +83,8 @@ final class DataUsageStore: @unchecked Sendable {
     private var unsavedBytes: UInt64 = 0
     private var retentionDays = DataUsageStore.defaultRetentionDays
     private var lastPrunedDay: String?
+    private var cachedSnapshot: DataUsageSnapshot?
+    private var cachedSnapshotDay = ""
 
     init(fileURL: URL? = nil, fileManager: FileManager = .default) {
         self.fileManager = fileManager
@@ -99,13 +101,13 @@ final class DataUsageStore: @unchecked Sendable {
         pruneDailyHistoryLocked(keepingDays: retentionDays, now: Date())
     }
 
-    func setRetentionDays(_ days: Int) {
+    func setRetentionDays(_ days: Int, now: Date = Date()) {
         let normalized = max(1, days)
         stateQueue.sync {
             guard normalized != retentionDays else { return }
             retentionDays = normalized
-            pruneDailyHistoryLocked(keepingDays: normalized, now: Date())
-            saveLocked(now: Date(), async: false)
+            pruneDailyHistoryLocked(keepingDays: normalized, now: now)
+            saveLocked(now: now, async: false)
         }
     }
 
@@ -135,6 +137,16 @@ final class DataUsageStore: @unchecked Sendable {
 
     func snapshot(currentNetworkName: String?, now: Date = Date()) -> DataUsageSnapshot {
         stateQueue.sync {
+            let today = dayKey(for: now)
+            let currentName = normalizedNetworkName(currentNetworkName)
+            if let cached = cachedSnapshot,
+               cachedSnapshotDay == today,
+               cached.currentNetworkName == currentName,
+               cached.overall.total == state.overall.total,
+               cached.retentionDays == retentionDays {
+                return cached
+            }
+
             let name = normalizedNetworkName(currentNetworkName)
             let networks = state.networks
                 .map { DataUsageNetworkRecord(name: $0.key, totals: $0.value) }
@@ -165,7 +177,7 @@ final class DataUsageStore: @unchecked Sendable {
                 return $0.day > $1.day
             }
 
-            return DataUsageSnapshot(
+            let snapshot = DataUsageSnapshot(
                 overall: state.overall,
                 today: state.daily[dayKey(for: now)] ?? DataUsageTotals(),
                 currentNetworkName: name,
@@ -175,11 +187,15 @@ final class DataUsageStore: @unchecked Sendable {
                 networkDailyRecords: networkDailyRecords,
                 retentionDays: retentionDays
             )
+            cachedSnapshotDay = today
+            cachedSnapshot = snapshot
+            return snapshot
         }
     }
 
     func flush() {
         stateQueue.sync {
+            guard unsavedBytes > 0 else { return }
             saveLocked(async: false)
         }
     }

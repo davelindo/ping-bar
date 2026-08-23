@@ -5,34 +5,43 @@ final class MetricHistory {
     private var index = 0
     private var isFull = false
     let capacity: Int
-    private var cachedValues: [Double?] = []
-    private var cachedNonNilValues: [Double] = []
     private var cachedLatest: Double?
     private var cachedAverage: Double?
     private var cachedJitter: Double?
     private var cachedLossPercentage: Double = 0
     private var cachedMin: Double?
     private var cachedMax: Double?
+    private var sum = 0.0
+    private var sumOfSquares = 0.0
+    private var nonNilCount = 0
+    private var valueCounts: [Double: Int] = [:]
+    private var cachedValues: [Double?]?
+    private var valuesRevision = 0
 
     init(capacity: Int = 60) {
         self.capacity = capacity
         self.buffer = Array(repeating: nil, count: capacity)
-        recalculate()
     }
 
     func add(_ value: Double?) {
+        if let oldValue = buffer[index] {
+            removeValue(oldValue)
+        }
+        if let value {
+            insert(value)
+        }
+
         buffer[index] = value
         index = (index + 1) % capacity
         if index == 0 { isFull = true }
-        recalculate()
+        cachedLatest = value
+        cachedValues = nil
+        valuesRevision += 1
+        recalculateStatistics()
     }
 
     var values: [Double?] {
-        cachedValues
-    }
-
-    var nonNilValues: [Double] {
-        cachedNonNilValues
+        orderedValues()
     }
 
     var latest: Double? {
@@ -59,65 +68,79 @@ final class MetricHistory {
         cachedMax
     }
 
+    var revision: Int {
+        valuesRevision
+    }
+
     func clear() {
         buffer = Array(repeating: nil, count: capacity)
         index = 0
         isFull = false
-        recalculate()
+        sum = 0
+        sumOfSquares = 0
+        nonNilCount = 0
+        valueCounts.removeAll(keepingCapacity: true)
+        cachedValues = nil
+        valuesRevision += 1
+        cachedLatest = nil
+        cachedAverage = nil
+        cachedJitter = nil
+        cachedMin = nil
+        cachedMax = nil
+        cachedLossPercentage = 0
     }
 
-    private func recalculate() {
-        if isFull {
-            cachedValues = Array(buffer[index...]) + Array(buffer[..<index])
+    private func insert(_ value: Double) {
+        nonNilCount += 1
+        sum += value
+        sumOfSquares += value * value
+        valueCounts[value, default: 0] += 1
+    }
+
+    private func removeValue(_ value: Double) {
+        sum -= value
+        sumOfSquares -= value * value
+        nonNilCount -= 1
+        let remainingCount = valueCounts[value].map { $0 - 1 } ?? -1
+        if remainingCount > 0 {
+            valueCounts[value] = remainingCount
         } else {
-            cachedValues = Array(buffer[..<index])
+            valueCounts.removeValue(forKey: value)
+        }
+    }
+
+    private func orderedValues() -> [Double?] {
+        if let cachedValues {
+            return cachedValues
         }
 
-        cachedLatest = cachedValues.last.flatMap { $0 }
-        cachedNonNilValues.removeAll(keepingCapacity: true)
-        cachedNonNilValues.reserveCapacity(cachedValues.count)
+        let values = isFull
+            ? Array(buffer[index...]) + Array(buffer[..<index])
+            : Array(buffer[..<index])
+        cachedValues = values
+        return values
+    }
 
-        var nilCount = 0
-        var minVal = Double.greatestFiniteMagnitude
-        var maxVal = -Double.greatestFiniteMagnitude
+    private func recalculateStatistics() {
+        let total = isFull ? capacity : index
+        let nilCount = total - nonNilCount
 
-        for value in cachedValues {
-            guard let value else {
-                nilCount += 1
-                continue
-            }
-            cachedNonNilValues.append(value)
-            minVal = min(minVal, value)
-            maxVal = max(maxVal, value)
-        }
-
-        let total = cachedValues.count
-        cachedLossPercentage = total > 0 ? Double(nilCount) / Double(total) * 100 : 0
-
-        guard !cachedNonNilValues.isEmpty else {
+        guard nonNilCount > 0 else {
             cachedAverage = nil
             cachedJitter = nil
             cachedMin = nil
             cachedMax = nil
+            cachedLossPercentage = total > 0 ? 100 : 0
             return
         }
 
-        cachedMin = minVal
-        cachedMax = maxVal
+        let mean = sum / Double(nonNilCount)
 
-        let sum = cachedNonNilValues.reduce(0, +)
-        let avg = sum / Double(cachedNonNilValues.count)
-        cachedAverage = avg
-
-        guard cachedNonNilValues.count > 1 else {
-            cachedJitter = nil
-            return
-        }
-
-        var deviationSum = 0.0
-        for value in cachedNonNilValues {
-            deviationSum += abs(value - avg)
-        }
-        cachedJitter = deviationSum / Double(cachedNonNilValues.count)
+        cachedLossPercentage = Double(nilCount) / Double(total) * 100
+        cachedMin = valueCounts.keys.min()
+        cachedMax = valueCounts.keys.max()
+        cachedAverage = mean
+        let variance = max(0, sumOfSquares / Double(nonNilCount) - mean * mean)
+        cachedJitter = nonNilCount > 1 ? variance.squareRoot() : nil
     }
 }

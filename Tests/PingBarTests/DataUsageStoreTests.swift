@@ -56,7 +56,7 @@ final class DataUsageStoreTests: XCTestCase {
 
         store.record(downloaded: 100, uploaded: 0, networkName: "Office", now: old)
         store.record(downloaded: 200, uploaded: 0, networkName: "Office", now: now)
-        store.setRetentionDays(7)
+        store.setRetentionDays(7, now: now)
 
         let snapshot = store.snapshot(currentNetworkName: "Office", now: now)
 

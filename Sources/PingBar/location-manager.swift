@@ -1,9 +1,9 @@
-import Foundation
 import CoreLocation
+import Foundation
 
 final class LocationManager: NSObject, CLLocationManagerDelegate {
     private let manager = CLLocationManager()
-    var onAuthorizationChanged: ((CLAuthorizationStatus) -> Void)?
+    var onAuthorizationChanged: (@MainActor @Sendable (CLAuthorizationStatus) -> Void)?
 
     override init() {
         super.init()
@@ -24,6 +24,8 @@ final class LocationManager: NSObject, CLLocationManagerDelegate {
     }
 
     func locationManagerDidChangeAuthorization(_ manager: CLLocationManager) {
-        onAuthorizationChanged?(manager.authorizationStatus)
+        let handler = onAuthorizationChanged
+        let status = manager.authorizationStatus
+        Task { @MainActor in handler?(status) }
     }
 }

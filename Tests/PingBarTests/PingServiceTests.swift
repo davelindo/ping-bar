@@ -11,4 +11,5 @@ final class PingServiceTests: XCTestCase {
     func testLatencyParserReturnsNilWhenNoSampleExists() {
         XCTAssertNil(PingService.latency(from: "ping: sendto: No route to host"))
     }
+
 }

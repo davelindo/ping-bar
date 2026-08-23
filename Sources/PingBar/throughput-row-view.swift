@@ -14,7 +14,7 @@ struct ThroughputRowView: View {
                 .foregroundColor(.primary)
                 .lineLimit(1)
                 .minimumScaleFactor(0.86)
-                .frame(width: 94, alignment: .leading)
+                .frame(width: 84, alignment: .leading)
 
             HStack(spacing: 6) {
                 Text(downText)
@@ -28,12 +28,12 @@ struct ThroughputRowView: View {
                     .lineLimit(1)
                     .minimumScaleFactor(0.75)
             }
-            .frame(width: 150, alignment: .leading)
+            .frame(width: 142, alignment: .leading)
 
             Spacer(minLength: 4)
 
             ThroughputGraphView(download: download, upload: upload)
-                .frame(minWidth: 50, maxWidth: .infinity, minHeight: 24, maxHeight: 24)
+                .frame(minWidth: 68, maxWidth: .infinity, minHeight: 24, maxHeight: 24)
                 .accessibilityHidden(true)
         }
         .frame(height: rowHeight)

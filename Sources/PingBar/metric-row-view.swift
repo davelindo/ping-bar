@@ -15,12 +15,12 @@ struct MetricRowView: View {
                 .foregroundColor(.primary)
                 .lineLimit(1)
                 .minimumScaleFactor(0.86)
-                .frame(width: 94, alignment: .leading)
+                .frame(width: 84, alignment: .leading)
 
             HStack(alignment: .firstTextBaseline, spacing: 4) {
                 Text(value)
                     .font(.system(size: 15, weight: .semibold, design: .monospaced))
-                    .foregroundColor(color)
+                    .foregroundColor(.primary)
                     .lineLimit(1)
                     .minimumScaleFactor(0.8)
                 if let sub = subtitle {
@@ -29,7 +29,7 @@ struct MetricRowView: View {
                         .foregroundColor(.secondary)
                 }
             }
-            .frame(width: 92, alignment: .leading)
+            .frame(width: 100, alignment: .leading)
 
             Spacer(minLength: 4)
 
@@ -41,7 +41,7 @@ struct MetricRowView: View {
                 lineOpacity: 0.86,
                 fillOpacity: 0.11
             )
-            .frame(minWidth: 68)
+            .frame(minWidth: 88)
             .accessibilityHidden(true)
         }
         .frame(height: rowHeight)
