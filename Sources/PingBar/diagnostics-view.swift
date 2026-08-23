@@ -34,11 +34,11 @@ struct DiagnosticsView: View {
 
                     footerBar
                 }
-                .frame(width: 390, height: 560)
+                .frame(width: 390, height: 640)
                 .background(popoverBackground)
             } else {
                 Color.clear
-                    .frame(width: 390, height: 560)
+                    .frame(width: 390, height: 640)
             }
         }
         .onChange(of: viewModel.isPopoverVisible) { visible in
@@ -47,6 +47,7 @@ struct DiagnosticsView: View {
                 historyScope = .all
             }
         }
+        .preferredColorScheme(.dark)
     }
 
     @ViewBuilder
@@ -62,11 +63,9 @@ struct DiagnosticsView: View {
     }
 
     private var mainContent: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 14) {
+        ScrollView(.vertical, showsIndicators: false) {
+            VStack(alignment: .leading, spacing: 16) {
                 networkSummary
-                healthOverview
-                dataUsageSection
 
                 if viewModel.connectionStatus == .offline {
                     offlineBanner
@@ -84,13 +83,13 @@ struct DiagnosticsView: View {
                     legacyWifiBanner
                 }
 
-                internetSection
-                wifiSection
-                dnsSection
+                healthOverview
+                diagnosticsPanel
+                dataUsageSection
             }
-            .padding(.horizontal, 16)
-            .padding(.top, 22)
-            .padding(.bottom, 18)
+            .padding(.horizontal, 14)
+            .padding(.top, 18)
+            .padding(.bottom, 16)
         }
     }
 
@@ -121,21 +120,31 @@ struct DiagnosticsView: View {
     }
 
     private var networkSummary: some View {
-        HStack(spacing: 14) {
+        HStack(spacing: 12) {
             Circle()
                 .fill(viewModel.connectionStatus.color)
-                .frame(width: 20, height: 20)
+                .frame(width: 10, height: 10)
+                .shadow(color: viewModel.connectionStatus.color.opacity(0.35), radius: 3)
 
             if viewModel.connectionStatus == .offline,
                viewModel.wifiInfo == nil,
                viewModel.defaultRouteInterface == nil {
-                Text("Not connected")
-                    .font(.system(size: 22, weight: .semibold))
-                    .foregroundColor(.secondary)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Not connected")
+                        .font(.system(size: 19, weight: .semibold))
+                    Text(viewModel.connectionStatus.label)
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundColor(.secondary)
+                }
             } else {
-                Text(viewModel.primaryConnectionName)
-                    .font(.system(size: 22, weight: .semibold))
-                    .lineLimit(1)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(viewModel.primaryConnectionName)
+                        .font(.system(size: 19, weight: .semibold))
+                        .lineLimit(1)
+                    Text(viewModel.connectionStatus.label)
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundColor(.secondary)
+                }
                 if let wifi = viewModel.wifiInfo, wifi.ssid == nil && !viewModel.hasLocationPermission {
                     Button(action: { viewModel.requestLocationPermission() }) {
                         Image(systemName: "location.north.fill")
@@ -154,177 +163,145 @@ struct DiagnosticsView: View {
             if let wifi = viewModel.wifiInfo {
                 let detailLabel = wifiDetailLabel(wifi)
                 Text(detailLabel)
-                    .font(.system(size: 14, weight: .semibold))
+                    .font(.system(size: 11, weight: .semibold))
                     .foregroundColor(.secondary)
                     .lineLimit(1)
                     .fixedSize(horizontal: true, vertical: false)
-                    .padding(.horizontal, 13)
-                    .padding(.vertical, 8)
-                    .background(panelFill, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 6)
+                    .background(Color.secondary.opacity(0.10), in: Capsule())
             }
 
             if let wiredIcon = wiredIndicatorIcon(type: viewModel.activeConnectionType) {
                 Image(systemName: wiredIcon)
-                    .foregroundColor(.green)
+                    .foregroundColor(.secondary)
                     .help(wiredIndicatorHelp(type: viewModel.activeConnectionType))
             }
 
             Button(action: showSettings) {
                 Image(systemName: "gearshape")
-                    .font(.system(size: 20, weight: .medium))
-                    .foregroundColor(face == .settings ? .primary : .secondary)
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundColor(.secondary)
+                    .frame(width: 30, height: 30)
+                    .background(Color.secondary.opacity(0.10), in: Circle())
             }
             .buttonStyle(.plain)
             .help(face == .settings ? "Back to Overview" : "Settings")
             .accessibilityLabel(face == .settings ? "Back to overview" : "Settings")
         }
-        .frame(height: 46)
+        .frame(height: 44)
     }
 
     private var dataUsageSection: some View {
-        sectionPanel("Data Usage") {
-            VStack(alignment: .leading, spacing: 10) {
-                HStack(alignment: .firstTextBaseline) {
-                    VStack(alignment: .leading, spacing: 3) {
-                        Text("Overall")
-                            .font(.system(size: 11, weight: .semibold))
-                            .foregroundColor(.secondary)
-                        Text(formatBytes(viewModel.dataUsage.overall.total))
-                            .font(.system(size: 24, weight: .semibold, design: .monospaced))
-                    }
+        Button(action: showHistory) {
+            HStack(spacing: 12) {
+                Image(systemName: "clock.arrow.circlepath")
+                    .font(.system(size: 17, weight: .medium))
+                    .foregroundColor(.secondary)
+                    .frame(width: 24)
 
-                    Spacer()
-
-                    VStack(alignment: .trailing, spacing: 4) {
-                        transferSplit(viewModel.dataUsage.overall)
-                        Text("Today \(formatBytes(viewModel.dataUsage.today.total))")
-                            .font(.system(size: 11, weight: .medium))
-                            .foregroundColor(.secondary)
-                    }
-                }
-
-                Divider().opacity(0.45)
-
-                if settings.isDataUsageHistoryEnabled {
-                    HStack(spacing: 10) {
-                        VStack(alignment: .leading, spacing: 3) {
-                            Text(settings.isPerNetworkUsageEnabled ? (viewModel.dataUsage.currentNetworkName ?? "Current Network") : "Per-SSID totals off")
-                                .font(.system(size: 12, weight: .semibold))
-                                .lineLimit(1)
-                            Text(settings.isPerNetworkUsageEnabled ? "\(formatBytes(viewModel.dataUsage.currentNetworkTotals?.total ?? 0)) on this network" : "Overall usage is still recorded")
-                                .font(.system(size: 11, weight: .medium))
-                                .foregroundColor(.secondary)
-                                .lineLimit(1)
-                        }
-
-                        Spacer()
-
-                        Button(action: showHistory) {
-                            Image(systemName: "clock.arrow.circlepath")
-                                .font(.system(size: 15, weight: .semibold))
-                        }
-                        .buttonStyle(.plain)
-                        .help("Data History")
-                        .accessibilityLabel("Data history")
-                    }
-                } else {
-                    Text("Usage history is off")
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Data Usage")
                         .font(.system(size: 12, weight: .medium))
                         .foregroundColor(.secondary)
+                    Text("Today \(formatBytes(viewModel.dataUsage.today.total))")
+                        .font(.system(size: 14, weight: .semibold, design: .monospaced))
+                        .foregroundColor(.primary)
                 }
 
-                if settings.isPerNetworkUsageEnabled {
-                    ForEach(Array(viewModel.dataUsage.networks.prefix(2))) { network in
-                        usageListRow(title: network.name, totals: network.totals)
-                    }
-                }
+                Spacer(minLength: 8)
+
+                transferSplit(viewModel.dataUsage.today)
+
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundColor(.secondary)
             }
-            .padding(.vertical, 10)
+            .padding(.horizontal, 14)
+            .frame(height: 62)
+            .contentShape(Rectangle())
         }
+        .buttonStyle(.plain)
+        .background(panelFill, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+        .overlay(panelOutline(cornerRadius: 10))
+        .help("Data History")
     }
 
     private var healthOverview: some View {
-        HStack(spacing: 8) {
+        HStack(spacing: 0) {
             healthTile(
                 title: "Internet",
                 value: formatLatency(viewModel.internetLatency),
-                icon: "globe",
                 color: viewModel.colorForInternetProbe(viewModel.internetLatency)
             )
-            healthTile(
-                title: "Router",
-                value: formatLatency(viewModel.routerLatency),
-                icon: "wifi.router",
-                color: viewModel.colorForPing(viewModel.routerLatency)
-            )
+
+            healthDivider
+
+            throughputHealthTile
+
+            healthDivider
+
             healthTile(
                 title: "Loss",
                 value: formatLoss(viewModel.internetLoss),
-                icon: "waveform.path.ecg",
                 color: viewModel.colorForLoss(viewModel.internetLoss)
             )
         }
+        .padding(.vertical, 14)
+        .background(panelFill, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+        .overlay(panelOutline(cornerRadius: 10))
     }
 
-    private func healthTile(title: String, value: String, icon: String, color: Color) -> some View {
-        HStack(alignment: .top, spacing: 8) {
-            Image(systemName: icon)
-                .font(.system(size: 16, weight: .medium))
-                .foregroundColor(color)
-                .frame(width: 18)
-
-            VStack(alignment: .leading, spacing: 12) {
-                Text(title)
-                    .font(.system(size: 13, weight: .semibold))
-                    .foregroundColor(.secondary)
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.8)
-                Text(value)
-                    .font(.system(size: 24, weight: .semibold, design: .monospaced))
-                    .foregroundColor(color)
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.72)
-            }
+    private func healthTile(title: String, value: String, color: Color) -> some View {
+        VStack(spacing: 7) {
+            Text(title)
+                .font(.system(size: 11, weight: .medium))
+                .foregroundColor(.secondary)
+            Text(value)
+                .font(.system(size: 19, weight: .semibold, design: .monospaced))
+                .foregroundColor(.primary)
+                .lineLimit(1)
+                .minimumScaleFactor(0.75)
+            Circle()
+                .fill(color)
+                .frame(width: 6, height: 6)
         }
-        .padding(.horizontal, 10)
-        .padding(.top, 18)
-        .frame(maxWidth: .infinity, minHeight: 96, alignment: .topLeading)
-        .background(panelFill, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+        .frame(maxWidth: .infinity)
     }
 
-    private var wifiSection: some View {
-        sectionPanel("Wi-Fi") {
-            if let wifi = viewModel.wifiInfo {
-                metricRow(
-                    label: "Signal",
-                    value: "\(wifi.rssi) dBm",
-                    color: viewModel.colorForSignal(wifi.rssi),
-                    history: viewModel.wifiSignalHistory
-                )
+    private var throughputHealthTile: some View {
+        VStack(spacing: 7) {
+            Text("Throughput")
+                .font(.system(size: 11, weight: .medium))
+                .foregroundColor(.secondary)
 
-                metricRow(
-                    label: "Noise",
-                    value: "\(wifi.noise) dBm",
-                    color: viewModel.colorForNoise(wifi.noise),
-                    history: viewModel.wifiNoiseHistory
-                )
-
-                metricRow(
-                    label: "Link Rate",
-                    value: formatMbps(wifi.linkRate),
-                    color: viewModel.colorForRate(wifi.linkRate, band: wifi.band),
-                    history: viewModel.wifiRateHistory
-                )
-            } else {
-                Text("Connect to Wi-Fi to see signal details.")
-                    .font(.system(size: 11))
-                    .foregroundColor(.secondary)
+            HStack(spacing: 7) {
+                Text("↓ \(formatCompactRate(viewModel.currentDownloadRate))")
+                    .foregroundColor(.blue)
+                Text("↑ \(formatCompactRate(viewModel.currentUploadRate))")
+                    .foregroundColor(.purple)
             }
+            .font(.system(size: 12, weight: .semibold, design: .monospaced))
+            .lineLimit(1)
+            .minimumScaleFactor(0.72)
+
+            Circle()
+                .fill(viewModel.connectionStatus.color)
+                .frame(width: 6, height: 6)
         }
+        .frame(maxWidth: .infinity)
     }
 
-    private var internetSection: some View {
-        sectionPanel("Internet") {
+    private var healthDivider: some View {
+        Rectangle()
+            .fill(Color.secondary.opacity(0.16))
+            .frame(width: 1, height: 58)
+    }
+
+    private var diagnosticsPanel: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            diagnosticsGroupHeader("Internet")
+
             metricRow(
                 label: "Latency",
                 value: formatLatency(viewModel.internetLatency),
@@ -337,47 +314,78 @@ struct DiagnosticsView: View {
                 downText: "↓ \(formatRate(viewModel.currentDownloadRate))",
                 upText: "↑ \(formatRate(viewModel.currentUploadRate))"
             )
-
             metricRow(
                 label: "Jitter",
                 value: formatLatency(viewModel.internetJitter),
                 color: viewModel.colorForJitter(viewModel.internetJitter),
                 history: viewModel.internetJitterHistory
             )
-
             metricRow(
                 label: "Loss",
                 value: formatLoss(viewModel.internetLoss),
                 color: viewModel.colorForLoss(viewModel.internetLoss),
                 history: viewModel.internetLossHistory
             )
-        }
-    }
 
-    private var dnsSection: some View {
-        sectionPanel("DNS") {
+            diagnosticsGroupHeader("Wi-Fi")
+
+            if let wifi = viewModel.wifiInfo {
+                metricRow(
+                    label: "Signal",
+                    value: "\(wifi.rssi) dBm",
+                    color: viewModel.colorForSignal(wifi.rssi),
+                    history: viewModel.wifiSignalHistory
+                )
+                metricRow(
+                    label: "Noise",
+                    value: "\(wifi.noise) dBm",
+                    color: viewModel.colorForNoise(wifi.noise),
+                    history: viewModel.wifiNoiseHistory
+                )
+                metricRow(
+                    label: "Link Rate",
+                    value: formatMbps(wifi.linkRate),
+                    color: viewModel.colorForRate(wifi.linkRate, band: wifi.band),
+                    history: viewModel.wifiRateHistory
+                )
+            } else {
+                Text("Connect to Wi-Fi to see signal details.")
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundColor(.secondary)
+                    .frame(maxWidth: .infinity, minHeight: 42, alignment: .leading)
+            }
+
+            diagnosticsGroupHeader("DNS", trailing: settings.dnsLookupHost)
+
             metricRow(
                 label: "Lookup",
                 value: formatLatency(viewModel.dnsLatency),
                 color: viewModel.colorForDns(viewModel.dnsLatency),
                 history: viewModel.dnsHistory
             )
-
-            HStack(spacing: 12) {
-                Text("Target")
-                    .font(.system(size: 14, weight: .regular))
-                Text(settings.dnsLookupHost)
-                    .font(.system(size: 14, weight: .medium, design: .monospaced))
-                    .foregroundColor(.primary)
-                    .lineLimit(1)
-                Spacer(minLength: 0)
-            }
-            .frame(height: 40)
         }
+        .padding(.horizontal, 12)
+        .padding(.bottom, 3)
+        .background(panelFill, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+        .overlay(panelOutline(cornerRadius: 10))
     }
 
-    private var sectionDivider: some View {
-        Divider().padding(.vertical, 4)
+    private func diagnosticsGroupHeader(_ title: String, trailing: String? = nil) -> some View {
+        HStack(alignment: .firstTextBaseline) {
+            Text(title)
+                .font(.system(size: 11, weight: .bold))
+                .foregroundColor(.secondary)
+                .textCase(.uppercase)
+            Spacer()
+            if let trailing {
+                Text(trailing)
+                    .font(.system(size: 10, weight: .medium, design: .monospaced))
+                    .foregroundColor(.secondary)
+                    .lineLimit(1)
+            }
+        }
+        .padding(.top, 13)
+        .padding(.bottom, 7)
     }
 
     private var captivePortalWarning: some View {
@@ -478,94 +486,6 @@ struct DiagnosticsView: View {
         viewModel.internetLoss >= 10
     }
 
-    private func sectionPanel<Content: View>(
-        _ title: String,
-        trailingText: String? = nil,
-        @ViewBuilder content: () -> Content
-    ) -> some View {
-        VStack(alignment: .leading, spacing: 0) {
-            HStack(alignment: .firstTextBaseline) {
-                Text(title)
-                    .font(.system(size: 14, weight: .bold))
-                    .foregroundColor(.secondary)
-                    .textCase(.uppercase)
-                Spacer()
-                if let trailingText {
-                    Text(trailingText)
-                        .font(.system(size: 10))
-                        .foregroundColor(.secondary)
-                        .lineLimit(1)
-                }
-            }
-            .padding(.horizontal, 12)
-            .padding(.top, 14)
-            .padding(.bottom, 8)
-
-            Divider()
-                .opacity(0.55)
-                .padding(.horizontal, 12)
-
-            content()
-                .padding(.horizontal, 12)
-                .padding(.bottom, 2)
-        }
-        .background(panelFill, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: 8, style: .continuous)
-                .stroke(Color.secondary.opacity(0.10), lineWidth: 1)
-        )
-    }
-
-    private func sectionHeader(_ title: String, subtitle: String? = nil) -> some View {
-        HStack(alignment: .firstTextBaseline) {
-            VStack(alignment: .leading, spacing: 2) {
-                Text(title)
-                    .font(.system(size: 11, weight: .semibold))
-                    .foregroundColor(.secondary)
-                    .textCase(.uppercase)
-                if let subtitle = subtitle {
-                    Text(subtitle)
-                        .font(.system(size: 10))
-                        .foregroundColor(.secondary)
-                }
-            }
-            Spacer()
-        }
-    }
-
-    private func sectionHeader<T: View>(_ title: String, subtitle: String? = nil, @ViewBuilder trailing: () -> T) -> some View {
-        HStack(alignment: .firstTextBaseline) {
-            VStack(alignment: .leading, spacing: 2) {
-                Text(title)
-                    .font(.system(size: 11, weight: .semibold))
-                    .foregroundColor(.secondary)
-                    .textCase(.uppercase)
-                if let subtitle = subtitle {
-                    Text(subtitle)
-                        .font(.system(size: 10))
-                        .foregroundColor(.secondary)
-                }
-            }
-            Spacer()
-            trailing()
-        }
-    }
-
-    private func sectionHeaderInline(_ title: String, trailingText: String?) -> some View {
-        HStack(alignment: .firstTextBaseline) {
-            Text(title)
-                .font(.system(size: 11, weight: .semibold))
-                .foregroundColor(.secondary)
-                .textCase(.uppercase)
-            Spacer()
-            if let trailingText {
-                Text(trailingText)
-                    .font(.system(size: 10))
-                    .foregroundColor(.secondary)
-            }
-        }
-    }
-
     private var historyHeader: some View {
         HStack(alignment: .center, spacing: 10) {
             Text("Data History")
@@ -610,7 +530,7 @@ struct DiagnosticsView: View {
     }
 
     private var historyRecords: some View {
-        VStack(alignment: .leading, spacing: 0) {
+        LazyVStack(alignment: .leading, spacing: 0) {
             HStack(spacing: 8) {
                 Label("Last \(viewModel.dataUsage.retentionDays) days", systemImage: "calendar")
                     .font(.system(size: 11, weight: .medium))
@@ -681,7 +601,7 @@ struct DiagnosticsView: View {
     }
 
     private var topNetworksSection: some View {
-        VStack(alignment: .leading, spacing: 0) {
+        LazyVStack(alignment: .leading, spacing: 0) {
             Text("Top Networks")
                 .font(.system(size: 12, weight: .bold))
                 .foregroundColor(.secondary)
@@ -740,15 +660,6 @@ struct DiagnosticsView: View {
         }
     }
 
-    private var isWiredConnection: Bool {
-        switch viewModel.activeConnectionType {
-        case .ethernet, .thunderbolt, .other:
-            return true
-        case .wifi:
-            return false
-        }
-    }
-
     private func wiredIndicatorIcon(type: ActiveConnectionType) -> String? {
         switch type {
         case .ethernet:
@@ -775,29 +686,25 @@ struct DiagnosticsView: View {
         }
     }
 
-    @ViewBuilder
-    private func glassContainer<Content: View>(@ViewBuilder _ content: () -> Content) -> some View {
-        if #available(macOS 26.0, *) {
-            GlassEffectContainer(spacing: 10) {
-                content()
-            }
-        } else {
-            content()
-        }
-    }
-
     private var popoverBackground: some View {
         Group {
             let shape = RoundedRectangle(cornerRadius: 18, style: .continuous)
             ZStack {
-                shape.fill(Color(nsColor: .windowBackgroundColor))
-                shape.stroke(Color(nsColor: .separatorColor).opacity(0.65), lineWidth: 1)
+                BlurEffectView(material: .popover)
+                    .clipShape(shape)
+                shape.fill(Color(nsColor: .windowBackgroundColor).opacity(0.72))
+                shape.stroke(Color.white.opacity(0.10), lineWidth: 1)
             }
         }
     }
 
     private var panelFill: some ShapeStyle {
-        Color(nsColor: .controlBackgroundColor)
+        Color(nsColor: .controlBackgroundColor).opacity(0.72)
+    }
+
+    private func panelOutline(cornerRadius: CGFloat) -> some View {
+        RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+            .stroke(Color.secondary.opacity(0.10), lineWidth: 1)
     }
 
     private var footerBar: some View {
@@ -812,32 +719,19 @@ struct DiagnosticsView: View {
                 .help("Back")
                 .accessibilityLabel("Back to overview")
             } else {
-                Button(action: showSettings) {
-                    Image(systemName: "slider.horizontal.3")
-                        .font(.system(size: 15, weight: .medium))
-                        .foregroundColor(.secondary)
-                }
-                .buttonStyle(.plain)
-                .help("Settings")
-                .accessibilityLabel("Settings")
-
-                Button(action: showHistory) {
-                    Image(systemName: "clock.arrow.circlepath")
-                        .font(.system(size: 15, weight: .medium))
-                        .foregroundColor(.secondary)
-                }
-                .buttonStyle(.plain)
-                .help("Data History")
-                .accessibilityLabel("Data history")
+                Text("Updated just now")
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundColor(.secondary)
             }
 
             Spacer()
 
-            Text(footerTitle)
-                .font(.system(size: 12, weight: .medium))
-                .foregroundColor(.secondary)
-
-            Spacer()
+            if face != .overview {
+                Text(footerTitle)
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundColor(.secondary)
+                Spacer()
+            }
 
             Button(action: onQuit) {
                 Image(systemName: "power")
@@ -848,9 +742,9 @@ struct DiagnosticsView: View {
             .help("Quit")
             .accessibilityLabel("Quit PingBar")
         }
-        .padding(.horizontal, 22)
-        .padding(.vertical, 10)
-        .background(Color(nsColor: .controlBackgroundColor))
+        .padding(.horizontal, 18)
+        .frame(height: 42)
+        .background(Color(nsColor: .controlBackgroundColor).opacity(0.58))
         .overlay(
             Rectangle()
                 .frame(height: 1)
@@ -940,13 +834,6 @@ struct DiagnosticsView: View {
         .lineLimit(1)
     }
 
-    private var dnsSubtitle: String {
-        if let first = viewModel.dnsServers.first {
-            return "Router assigned (\(first))"
-        }
-        return "Router assigned"
-    }
-
     private func formatLatency(_ ms: Double?) -> String {
         guard let ms = ms else { return "---" }
         if ms >= 1000 {
@@ -979,6 +866,22 @@ struct DiagnosticsView: View {
             return String(format: "%.0f Kbps", bitsPerSecond / 1_000)
         }
         return String(format: "%.0f bps", bitsPerSecond)
+    }
+
+    private func formatCompactRate(_ bytesPerSecond: Double?) -> String {
+        guard let bytesPerSecond else { return "—" }
+        let bitsPerSecond = max(0, bytesPerSecond) * 8
+        if bitsPerSecond >= 1_000_000_000 {
+            return String(format: "%.1fG", bitsPerSecond / 1_000_000_000)
+        }
+        if bitsPerSecond >= 1_000_000 {
+            let mbps = bitsPerSecond / 1_000_000
+            return mbps >= 100 ? String(format: "%.0fM", mbps) : String(format: "%.1fM", mbps)
+        }
+        if bitsPerSecond >= 1_000 {
+            return String(format: "%.0fK", bitsPerSecond / 1_000)
+        }
+        return String(format: "%.0fb", bitsPerSecond)
     }
 
     private func formatBytes(_ bytes: UInt64) -> String {

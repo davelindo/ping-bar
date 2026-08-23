@@ -71,7 +71,7 @@ struct WiFiIdentity: Equatable {
     let interfaceName: String?
 }
 
-final class WiFiService {
+final class WiFiService: @unchecked Sendable {
     private let client = CWWiFiClient.shared()
 
     func getCurrentIdentity() -> WiFiIdentity? {

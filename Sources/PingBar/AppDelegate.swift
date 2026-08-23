@@ -11,6 +11,6 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     @MainActor
     func applicationWillTerminate(_ notification: Notification) {
-        statusBarController?.shutdown()
+        statusBarController?.flushDataUsage()
     }
 }

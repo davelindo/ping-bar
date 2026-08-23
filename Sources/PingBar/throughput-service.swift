@@ -8,7 +8,7 @@ struct ThroughputSample {
     let counterMaximum: UInt64?
 }
 
-final class ThroughputService {
+final class ThroughputService: @unchecked Sendable {
     func sample(interfaceName: String?) -> ThroughputSample? {
         guard let interfaceName, !interfaceName.isEmpty else { return nil }
         if let sample = sample64(interfaceName: interfaceName) {
