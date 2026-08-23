@@ -41,7 +41,7 @@ final class DNSService: @unchecked Sendable {
             return nil
         }
 
-        let queue = DispatchQueue(label: "com.davelindo.pingbar.dns-probe")
+        let queue = DispatchQueue(label: "me.davelindon.pingbar.dns-probe")
         guard DNSServiceSetDispatchQueue(serviceRef, queue) == kDNSServiceErr_NoError else {
             DNSServiceRefDeallocate(serviceRef)
             Unmanaged<DNSCallbackContext>.fromOpaque(contextPointer).release()
