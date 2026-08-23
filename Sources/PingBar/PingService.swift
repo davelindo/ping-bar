@@ -1,6 +1,6 @@
+import Darwin
 import Foundation
 import Network
-import Darwin
 
 final class PingService: Sendable {
     enum Backend: Sendable {
@@ -28,10 +28,6 @@ final class PingService: Sendable {
     }
 
     private func executeSystemPing() -> Double? {
-        return executeExternalPing()
-    }
-
-    private func executeExternalPing() -> Double? {
         let process = Process()
         let pipe = Pipe()
 
@@ -169,7 +165,6 @@ private final class TCPConnectProbe: @unchecked Sendable {
     func elapsed() -> Double? {
         lock.lock()
         defer { lock.unlock() }
-        let value = value
         return value
     }
 }

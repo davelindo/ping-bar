@@ -147,7 +147,6 @@ final class DataUsageStore: @unchecked Sendable {
                 return cached
             }
 
-            let name = normalizedNetworkName(currentNetworkName)
             let networks = state.networks
                 .map { DataUsageNetworkRecord(name: $0.key, totals: $0.value) }
                 .sorted {
@@ -179,9 +178,9 @@ final class DataUsageStore: @unchecked Sendable {
 
             let snapshot = DataUsageSnapshot(
                 overall: state.overall,
-                today: state.daily[dayKey(for: now)] ?? DataUsageTotals(),
-                currentNetworkName: name,
-                currentNetworkTotals: name.flatMap { state.networks[$0] },
+                today: state.daily[today] ?? DataUsageTotals(),
+                currentNetworkName: currentName,
+                currentNetworkTotals: currentName.flatMap { state.networks[$0] },
                 networks: networks,
                 overallDailyRecords: overallDailyRecords,
                 networkDailyRecords: networkDailyRecords,

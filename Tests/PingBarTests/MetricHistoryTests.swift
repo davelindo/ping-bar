@@ -54,6 +54,20 @@ final class MetricHistoryTests: XCTestCase {
         XCTAssertTrue(history.values.isEmpty)
     }
 
+    func testRevisionIncrementsOnMutationAndClear() {
+        let history = MetricHistory(capacity: 4)
+        let initialRevision = history.revision
+
+        history.add(3.0)
+        XCTAssertEqual(history.revision, initialRevision + 1)
+
+        history.add(nil)
+        XCTAssertEqual(history.revision, initialRevision + 2)
+
+        history.clear()
+        XCTAssertEqual(history.revision, initialRevision + 3)
+    }
+
     private func percentageOfNil(in values: [Double?]) -> Double {
         guard !values.isEmpty else { return 0 }
         return Double(values.filter { $0 == nil }.count) / Double(values.count) * 100
@@ -70,21 +84,5 @@ final class MetricHistoryTests: XCTestCase {
             ? (values.reduce(0) { $0 + ($1 - mean) * ($1 - mean) } / Double(values.count)).squareRoot()
             : nil
         return (mean, standardDeviation, values.min(), values.max())
-    }
-}
-
-extension MetricHistoryTests {
-    func testRevisionIncrementsOnMutationAndClear() {
-        let history = MetricHistory(capacity: 4)
-        let initialRevision = history.revision
-
-        history.add(3.0)
-        XCTAssertEqual(history.revision, initialRevision + 1)
-
-        history.add(nil)
-        XCTAssertEqual(history.revision, initialRevision + 2)
-
-        history.clear()
-        XCTAssertEqual(history.revision, initialRevision + 3)
     }
 }

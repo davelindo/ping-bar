@@ -1,4 +1,5 @@
 import XCTest
+
 @testable import PingBar
 
 final class DefaultRouteProbeTests: XCTestCase {

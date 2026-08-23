@@ -1,4 +1,5 @@
 import XCTest
+
 @testable import PingBar
 
 final class SpeedTestServiceTests: XCTestCase {
@@ -28,7 +29,6 @@ final class SpeedTestServiceTests: XCTestCase {
         }
 
         let nextPreparing = expectation(description: "next run started preparing")
-        var nextOutcome: Result<SpeedTestResult, SpeedTestError>?
         service.run(
             routerHost: nil,
             phase: { phase in
@@ -36,9 +36,7 @@ final class SpeedTestServiceTests: XCTestCase {
                     nextPreparing.fulfill()
                 }
             },
-            completion: { result in
-                nextOutcome = result
-            }
+            completion: { _ in }
         )
 
         await fulfillment(of: [nextPreparing], timeout: 0.5)

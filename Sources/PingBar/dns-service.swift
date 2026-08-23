@@ -138,12 +138,6 @@ private final class DNSResolutionProbe: @unchecked Sendable {
         return success
     }
 
-    func finish(success newValue: Bool) {
-        lock.lock()
-        success = newValue
-        lock.unlock()
-    }
-
     func finish(success newValue: Bool, signal semaphore: DispatchSemaphore) {
         lock.lock()
         let shouldSignal = newValue && !success

@@ -139,8 +139,7 @@ final class SpeedTestService: @unchecked Sendable {
             self.stateLock.lock()
             self.runState.pingStopSemaphore = stopSemaphore
             self.stateLock.unlock()
-            let pingWorker = DispatchQueue.global(qos: .background)
-            pingWorker.async {
+            DispatchQueue.global(qos: .background).async {
                 while !self.isRunCancelled() {
                     if stopSemaphore.wait(timeout: .now()) == .success {
                         break
@@ -258,7 +257,7 @@ final class SpeedTestService: @unchecked Sendable {
                 AppLog.speedTest.error("Download test returned more than \(bytes, privacy: .public) bytes")
                 return
             }
-            result.record(result.snapshot().bytes + responseData.count)
+            result.succeed(bytes: result.snapshot().bytes + responseData.count)
         }
         stateLock.lock()
         runState.downloadTask = task
@@ -406,8 +405,7 @@ private final class LockedDoubleSamples: @unchecked Sendable {
     func snapshot() -> [Double] {
         lock.lock()
         defer { lock.unlock() }
-        let snapshot = values
-        return snapshot
+        return values
     }
 }
 
@@ -415,13 +413,6 @@ private final class URLTransferResult: @unchecked Sendable {
     private let lock = NSLock()
     private var bytes = 0
     private var success = false
-
-    func record(_ byteCount: Int) {
-        lock.lock()
-        defer { lock.unlock() }
-        bytes = byteCount
-        success = true
-    }
 
     func succeed(bytes: Int) {
         lock.lock()
@@ -433,7 +424,6 @@ private final class URLTransferResult: @unchecked Sendable {
     func snapshot() -> (bytes: Int, success: Bool) {
         lock.lock()
         defer { lock.unlock() }
-        let snapshot = (bytes: bytes, success: success)
-        return snapshot
+        return (bytes: bytes, success: success)
     }
 }

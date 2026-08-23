@@ -80,8 +80,7 @@ final class DiagnosticsService {
         guard !isRunning else { return }
         isRunning = true
         isStopRequested = false
-        let runID = UUID()
-        monitoringRunID = runID
+        monitoringRunID = UUID()
 
         applyRouteInfo(routeDetector())
         if internetPingService == nil {
@@ -242,66 +241,66 @@ final class DiagnosticsService {
                     )
                 }
 
-            let wifiInfoBox = ProbeResultBox<WiFiIdentity?>()
-            let wifiDetailBox = ProbeResultBox<WiFiInfo?>()
+            let wifiIdentityBox = ProbeResultBox<WiFiIdentity?>()
+            let wifiInfoBox = ProbeResultBox<WiFiInfo?>()
             let routerLatencyBox = ProbeResultBox<Double?>()
             let internetLatencyBox = ProbeResultBox<Double?>()
             let dnsLatencyBox = ProbeResultBox<Double?>()
             let throughputSampleBox = ProbeResultBox<ThroughputSample?>()
-            let wifiInfoGroup = DispatchGroup()
+            let probeGroup = DispatchGroup()
 
             if detailed {
-                wifiInfoGroup.enter()
+                probeGroup.enter()
                 DispatchQueue.global(qos: .background).async {
                     let info = probeWiFiService?.getCurrentInfo()
-                    wifiInfoBox.value = info.map { WiFiIdentity(ssid: $0.ssid, interfaceName: $0.interfaceName) }
-                    wifiDetailBox.value = info
-                    wifiInfoGroup.leave()
+                    wifiIdentityBox.value = info.map { WiFiIdentity(ssid: $0.ssid, interfaceName: $0.interfaceName) }
+                    wifiInfoBox.value = info
+                    probeGroup.leave()
                 }
             } else {
-                wifiInfoGroup.enter()
+                probeGroup.enter()
                 DispatchQueue.global(qos: .background).async {
                     let identity = wifiService.getCurrentIdentity()
-                    wifiInfoBox.value = identity
-                    wifiInfoGroup.leave()
+                    wifiIdentityBox.value = identity
+                    probeGroup.leave()
                 }
             }
 
             if detailed, let routerService {
-                wifiInfoGroup.enter()
+                probeGroup.enter()
                 DispatchQueue.global(qos: .background).async {
                     routerLatencyBox.value = routerService.executePing()
-                    wifiInfoGroup.leave()
+                    probeGroup.leave()
                 }
             }
 
             if let internetService {
-                wifiInfoGroup.enter()
+                probeGroup.enter()
                 DispatchQueue.global(qos: .background).async {
                     internetLatencyBox.value = internetService.executePing()
-                    wifiInfoGroup.leave()
+                    probeGroup.leave()
                 }
             }
 
-            if probeDNSService != nil {
-                wifiInfoGroup.enter()
+            if let probeDNSService {
+                probeGroup.enter()
                 DispatchQueue.global(qos: .background).async {
-                    dnsLatencyBox.value = probeDNSService?.lookup()
-                    wifiInfoGroup.leave()
+                    dnsLatencyBox.value = probeDNSService.lookup()
+                    probeGroup.leave()
                 }
             }
 
-            wifiInfoGroup.enter()
+            probeGroup.enter()
             DispatchQueue.global(qos: .background).async {
                 throughputSampleBox.value = throughputService.sample(interfaceName: routeInfo.interface)
-                wifiInfoGroup.leave()
+                probeGroup.leave()
             }
 
             let probedValues = await withCheckedContinuation { (continuation: CheckedContinuation<ProbeValues, Never>) in
-                wifiInfoGroup.notify(queue: .global(qos: .background)) {
+                probeGroup.notify(queue: .global(qos: .background)) {
                     continuation.resume(returning: ProbeValues(
-                        wifiIdentity: wifiInfoBox.value ?? nil,
-                        wifiInfo: wifiDetailBox.value.flatMap { $0 },
+                        wifiIdentity: wifiIdentityBox.value ?? nil,
+                        wifiInfo: wifiInfoBox.value.flatMap { $0 },
                         routerLatency: routerLatencyBox.value.flatMap { $0 },
                         internetLatency: internetLatencyBox.value.flatMap { $0 },
                         dnsLatency: dnsLatencyBox.value.flatMap { $0 },
@@ -553,10 +552,10 @@ final class DiagnosticsService {
         currentUploadRate = Double(deltaOut) / deltaTime
         totalDownloaded = (totalDownloaded ?? 0) + Double(deltaIn)
         totalUploaded = (totalUploaded ?? 0) + Double(deltaOut)
-                if isDataUsageHistoryEnabled, deltaIn > 0 || deltaOut > 0 {
-                    dataUsageStore.record(
-                        downloaded: deltaIn,
-                        uploaded: deltaOut,
+        if isDataUsageHistoryEnabled, deltaIn > 0 || deltaOut > 0 {
+            dataUsageStore.record(
+                downloaded: deltaIn,
+                uploaded: deltaOut,
                 networkName: networkNameForAccounting(),
                 now: sample.timestamp
             )
@@ -619,10 +618,6 @@ private final class InterfaceDisplayNameCache: @unchecked Sendable {
 }
 
 enum DefaultRouteProbe {
-    static func detect(_ detector: () -> (gateway: String?, interface: String?) = DefaultRouteProbe.systemDetector) -> (gateway: String?, interface: String?) {
-        detector()
-    }
-
     static let systemDetector: @Sendable () -> (gateway: String?, interface: String?) = {
         var mib: [Int32] = [CTL_NET, PF_ROUTE, AF_INET, 0, NET_RT_DUMP, 0]
         var length = 0
@@ -738,10 +733,10 @@ private final class ProbeResultBox<Value>: @unchecked Sendable {
 }
 
 private struct ProbeValues: Sendable {
-    var wifiIdentity: WiFiIdentity?
-    var wifiInfo: WiFiInfo?
-    var routerLatency: Double?
-    var internetLatency: Double?
-    var dnsLatency: Double?
-    var throughputSample: ThroughputSample?
+    let wifiIdentity: WiFiIdentity?
+    let wifiInfo: WiFiInfo?
+    let routerLatency: Double?
+    let internetLatency: Double?
+    let dnsLatency: Double?
+    let throughputSample: ThroughputSample?
 }

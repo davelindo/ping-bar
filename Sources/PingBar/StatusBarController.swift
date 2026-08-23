@@ -173,10 +173,10 @@ class StatusBarController: NSObject, NSPopoverDelegate {
     }
 
     private func latencyDisplayColor(_ latency: Double?) -> NSColor {
-        guard diagnosticsService.isRunning, let latency else {
+        guard diagnosticsService.isRunning, latency != nil else {
             return .secondaryLabelColor
         }
-        return colorForLatency(latency)
+        return .labelColor
     }
 
     private func statusBarThroughputRates() -> (down: Double, up: Double)? {
@@ -191,10 +191,6 @@ class StatusBarController: NSObject, NSPopoverDelegate {
         }
 
         return nil
-    }
-
-    private func colorForLatency(_ ms: Double) -> NSColor {
-        .labelColor
     }
 
     private func compactRateString(_ bytesPerSecond: Double) -> String {
